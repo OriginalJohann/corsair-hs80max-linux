@@ -94,12 +94,17 @@ class HS80Service:
     StatusChanged = _dbus_signal()
 
     def GetStatus(self) -> dict:
-        """Return status as a{sv} (dict of GLib.Variant values for pydbus)."""
+        """Return status as ``a{sv}``.
+
+        pydbus does not auto-wrap dict values into ``GLib.Variant`` for
+        ``a{sv}`` returns, so we wrap each value explicitly with the
+        correct D-Bus type signature.
+        """
         return {
             "Mode": GLib.Variant("s", self._status.mode),
             "Battery": GLib.Variant("i", self._status.battery),
             "MicMuted": GLib.Variant("b", self._status.mic_muted),
-            "UpdatedAt": GLib.Variant("x", int(self._status.updated_at * 1000)),
+            "UpdatedAt": GLib.Variant("t", int(self._status.updated_at * 1000)),
         }
 
     def GetBattery(self) -> int:
@@ -127,15 +132,11 @@ class HS80Service:
             self._status = status
             # Emit D-Bus signal from the main loop to avoid deadlocks.
             # publish() is called from the Poller thread; dispatching here
-            # ensures emit_signal runs in the GLib main-loop context.
+            # ensures the signal emission runs in the GLib main-loop context.
+            # pydbus's ObjectWrapper auto-connects StatusChanged to the bus.
             GLib.idle_add(
-                lambda: self._bus.con.emit_signal(
-                    OBJECT_PATH,
-                    INTERFACE,
-                    "StatusChanged",
-                    GLib.Variant("ay", GLib.Variant("(sib)", (
-                        status.mode, status.battery, status.mic_muted,
-                    )).get_data_as_bytes()),
+                lambda: self.StatusChanged(
+                    status.mode, status.battery, status.mic_muted,
                 )
             )
         else:

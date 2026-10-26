@@ -26,11 +26,15 @@ let
   # ./..  →  service/
   serviceDir = ./..;
   dbusConf   = ../dbus/com.corsair.hs80max.conf;
-  unitFile   = ../hs80max.service;
+
+  # Python environment with required third-party packages.
+  pythonEnv = pkgs.python3.withPackages (ps: [
+    ps.pydbus
+  ]);
 
   # Wrapper script that adds the service package to sys.path and runs the daemon.
   wrapper = pkgs.writeScriptBin "hs80max-service" ''
-    #!${pkgs.python3}/bin/python3
+    #!${pythonEnv}/bin/python3
     import sys
     sys.path.insert(0, "${serviceDir}")
     from hs80max_service.main import main
@@ -60,10 +64,13 @@ in
       cp ${dbusConf} $out/lib/dbus-1/session.conf.d/
     '';
 
-    # Install the systemd user unit into the system profile.
+    # -------------------------------------------------- systemd user unit
+    # Copy the unit into /usr/lib/systemd/user/ via the system profile.
+    # Also create an unhashed symlink so `systemctl --user` can find it
+    # by its plain name (NixOS hashes unit filenames by default).
     system.activationScripts.hs80max-unit.text = ''
       mkdir -p $out/lib/systemd/user
-      cp ${unitFile} $out/lib/systemd/user/
+      cp ${../hs80max.service} $out/lib/systemd/user/hs80max.service
     '';
   };
 }

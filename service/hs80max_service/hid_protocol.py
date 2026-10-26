@@ -1,14 +1,16 @@
 """HS80 Max Wireless (1b1c:0a97) HID protocol.
 
 Implements the proprietary receiver/headset protocol as documented in
-``ressources/battery-protocol.md`` (derived from the reference implementation
-``Sapd/HeadsetControl``).
+``ressourcen/battery-protocol.md`` (derived from the reference implementation
+``Sapd/HeadsetControl``, class ``CorsairVoidV2W``).
 
 The control channel is the HID interface 4 of the wireless receiver
-(OUT EP 0x02, IN EP 0x83), exposed on this system as ``/dev/hidraw1``.
+(exposed on this system as ``/dev/hidraw1``).  Interface 0 is bound to
+``snd-usb-audio`` and interfaces 1-3 are secondary HID interfaces that do
+not respond to control commands.
 
-All messages are 64-byte payloads; writes are prefixed with report ID
-``0x00`` (total 65 bytes on the hidraw device node).
+All writes are 65 bytes (report ID ``0x00`` + 64 payload bytes); reads are
+64-byte IN reports.
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ BATTERY_MAX = 1000
 BATTERY_MAX_ATTEMPTS = 3
 
 # Read timeout for IN reports (seconds).
-READ_TIMEOUT = 1.0
+READ_TIMEOUT = 5.0
 
 
 class HIDError(Exception):
@@ -113,17 +115,20 @@ class HS80HID:
 
     # ------------------------------------------------------------------- io
     def _write(self, payload: bytes) -> None:
-        """Write a 64-byte payload prefixed with report ID 0x00."""
+        """Write a 65-byte report (report ID 0x00 + 64 payload bytes).
+
+        ``payload`` must already include the report ID as its first byte.
+        It is zero-padded to ``MSG_SIZE_WRITE`` (65) bytes.
+        """
         if self._fd is None:
             raise HIDError("device not open")
-        data = b"\x00" + payload.ljust(MSG_SIZE_READ - 1, b"\x00")
+        data = payload.ljust(MSG_SIZE_WRITE, b"\x00")
         written = 0
         while written < len(data):
             try:
                 written += os.write(self._fd, data[written:])
             except BlockingIOError:
                 time.sleep(0.005)
-
     def _read(self, timeout: float = READ_TIMEOUT) -> bytes | None:
         """Read one 64-byte IN report; ``None`` on timeout."""
         if self._fd is None:
@@ -148,16 +153,32 @@ class HS80HID:
 
     # -------------------------------------------------------------- protocol
     def wake(self) -> bool:
-        """Minimal handshake to reach the headset (no audible pop).
+        """Initialise the receiver/headset control channel.
+
+        Follows the ``CorsairVoidV2W::initializeDevice`` sequence from
+        HeadsetControl:
+
+        1. Receiver firmware query
+        2. Receiver software-mode enable
+        3. Receiver heartbeat
+        4. Headset software-mode enable
+        5. Flush pending IN reports
+        6. Headset heartbeat  →  read response
 
         Returns ``True`` when the headset is connected to the receiver,
         ``False`` otherwise (heartbeat read timed out).
         """
-        # 1. Receiver firmware query, 2. receiver heartbeat.
+        # 1. Receiver firmware query
         self._write(bytes([0x00, 0x02, RECEIVER_ENDPOINT, 0x02, 0x13]))
+        # 2. Receiver software-mode enable
+        self._write(bytes([0x00, 0x02, RECEIVER_ENDPOINT, 0x01, 0x03, 0x00, 0x02]))
+        # 3. Receiver heartbeat
         self._write(bytes([0x00, 0x02, RECEIVER_ENDPOINT, 0x02, 0x12]))
+        # 4. Headset software-mode enable
+        self._write(bytes([0x00, 0x02, HEADSET_ENDPOINT, 0x01, 0x03, 0x00, 0x02]))
+        # 5. Flush pending IN reports
         self._flush()
-        # 3. Headset heartbeat + read its response.
+        # 6. Headset heartbeat → read response
         self._write(bytes([0x00, 0x02, HEADSET_ENDPOINT, 0x02, 0x12]))
         return self._read() is not None
 
