@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Headset wireless: with signal waves -->
+  <g fill="none" stroke="#ccc" stroke-width="1.5" stroke-linecap="round">
+    <!-- Headband -->
+    <path d="M3 8 Q3 3 8 3 Q13 3 13 8"/>
+    <!-- Left ear cup -->
+    <rect x="1.5" y="7" width="3" height="5" rx="1" fill="#ccc" stroke="none"/>
+    <!-- Right ear cup -->
+    <rect x="11.5" y="7" width="3" height="5" rx="1" fill="#ccc" stroke="none"/>
+    <!-- Wireless waves -->
+    <path d="M6 13 Q8 11 10 13" stroke="#ccc" stroke-width="1"/>
+    <path d="M5 14.5 Q8 12 11 14.5" stroke="#ccc" stroke-width="0.8"/>
+  </g>
+</svg>

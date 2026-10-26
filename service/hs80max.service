@@ -1,0 +1,23 @@
+# systemd user unit for the HS80 Max status service.
+#
+# Install (manual, without the NixOS module):
+#   mkdir -p ~/.config/systemd/user
+#   cp service/hs80max.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now hs80max
+#
+# When using the NixOS module (service/nixos/hs80max.nix), the unit is
+# installed automatically and the ExecStart path is correct.
+
+[Unit]
+Description=Corsair HS80 Max status service (battery, connection mode)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/run/current-system/sw/bin/hs80max-service
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

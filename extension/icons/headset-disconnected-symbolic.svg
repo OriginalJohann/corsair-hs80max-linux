@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Headset disconnected: greyed out -->
+  <g fill="none" stroke="#999" stroke-width="1.5" stroke-linecap="round">
+    <!-- Headband -->
+    <path d="M3 8 Q3 3 8 3 Q13 3 13 8"/>
+    <!-- Left ear cup -->
+    <rect x="1.5" y="7" width="3" height="5" rx="1" fill="#999" stroke="none"/>
+    <!-- Right ear cup -->
+    <rect x="11.5" y="7" width="3" height="5" rx="1" fill="#999" stroke="none"/>
+    <!-- X mark (disconnected) -->
+    <line x1="6" y1="13" x2="10" y2="15" stroke="#999" stroke-width="1"/>
+    <line x1="10" y1="13" x2="6" y2="15" stroke="#999" stroke-width="1"/>
+  </g>
+</svg>

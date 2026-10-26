@@ -1,0 +1,9 @@
+{
+  "uuid": "hs80max@fne.dev",
+  "name": "Corsair HS80 Max Status",
+  "description": "Shows connection status and battery level for the Corsair HS80 Max headset in the GNOME top bar.",
+  "version": "0.1.0",
+  "shell-version": ["50"],
+  "author": "fne",
+  "url": "https://github.com/fne/corsair-hs80max-linux"
+}
