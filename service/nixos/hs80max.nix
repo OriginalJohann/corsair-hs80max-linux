@@ -65,12 +65,23 @@ in
     '';
 
     # -------------------------------------------------- systemd user unit
-    # Copy the unit into /usr/lib/systemd/user/ via the system profile.
-    # Also create an unhashed symlink so `systemctl --user` can find it
-    # by its plain name (NixOS hashes unit filenames by default).
-    system.activationScripts.hs80max-unit.text = ''
-      mkdir -p $out/lib/systemd/user
-      cp ${../hs80max.service} $out/lib/systemd/user/hs80max.service
-    '';
+    # Defined through NixOS's systemd integration, which installs the unit
+    # with a hashed filename (e.g. "ajk15…-hs80max.service") and makes
+    # `systemctl --user enable --now hs80max` resolve to it automatically.
+    # We deliberately do NOT copy a plain-named "hs80max.service" into
+    # /usr/lib/systemd/user: a second unit running the same daemon would
+    # fight over the D-Bus name (com.corsair.hs80max) and crash-loop with
+    # "name already exists on the bus".
+    systemd.user.services.hs80max = {
+      description = "Corsair HS80 Max status service (battery, connection mode)";
+      after = [ "graphical-session.target" ];
+      wantedBy = [ "default.target" ];
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = "${wrapper}/bin/hs80max-service";
+        Restart = "on-failure";
+        RestartSec = 5;
+      };
+    };
   };
 }

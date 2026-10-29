@@ -1,7 +1,7 @@
 """HS80 Max Wireless (1b1c:0a97) HID protocol.
 
 Implements the proprietary receiver/headset protocol as documented in
-``ressourcen/battery-protocol.md`` (derived from the reference implementation
+``resources/battery-protocol.md`` (derived from the reference implementation
 ``Sapd/HeadsetControl``, class ``CorsairVoidV2W``).
 
 The control channel is the HID interface 4 of the wireless receiver
@@ -29,7 +29,7 @@ PRODUCT_ID = 0x0A97
 # HID interface number of the control channel (see battery-protocol.md).
 CONTROL_INTERFACE = 4
 
-# Protocol constants (see resourcen/battery-protocol.md).
+# Protocol constants (see resources/battery-protocol.md).
 RECEIVER_ENDPOINT = 0x08
 HEADSET_ENDPOINT = 0x09
 MSG_SIZE_READ = 64
@@ -42,6 +42,44 @@ BATTERY_MAX_ATTEMPTS = 3
 
 # Read timeout for IN reports (seconds).
 READ_TIMEOUT = 5.0
+
+# ``wake()`` is retried this many times (with a short pause between attempts)
+# before giving up.  The headset only answers the control channel shortly
+# after it wakes up / reconnects and then goes quiet (emitting only periodic
+# ``id=01`` status reports), so a single attempt frequently misses the
+# responsive window.  Retrying improves the odds of landing inside it.
+WAKE_ATTEMPTS = 3
+WAKE_RETRY_PAUSE = 0.5
+
+# Report ID of the receiver's *periodic* status reports, which arrive
+# roughly every 5 s even when no command was sent (observed:
+# ``01 00 02 00 00 10 76 …`` and ``01 00 02 00 97 0a …``).  These must not
+# be mistaken for query responses, otherwise ``wake()`` reports a false
+# positive and battery/mic reads consume the timeout on a stale report.
+PERIODIC_REPORT_ID = 0x01
+
+
+def _is_periodic_report(report: bytes) -> bool:
+    """Return True when ``report`` is a known periodic receiver status report.
+
+    The wireless receiver emits small status reports roughly every 5 s
+    independent of any command (observed with the headset off):
+
+    * ``01 00 02 00 00 10 76 …``  – receiver status
+    * ``01 00 02 00 97 0a …``     – receiver status carrying the
+      product ID ``0x0a97`` (little-endian)
+
+    A genuine headset response to our queries is one of: a battery value
+    in ``1..1000`` at bytes [4]/[5], the mic flag at byte [4], or the
+    headset heartbeat reply.  None of these match the patterns above,
+    so this check is a safe first-stage filter before value validation.
+    """
+    if len(report) < 8 or report[0] != PERIODIC_REPORT_ID:
+        return False
+    return report[1:4] == b"\x00\x02\x00" and (
+        report[4:7] == b"\x00\x10\x76"  # status report (fixed tail)
+        or report[4:7] == b"\x97\x0a\x00"  # product-ID status report
+    )
 
 
 class HIDError(Exception):
@@ -102,7 +140,7 @@ class HS80HID:
         except PermissionError as exc:
             raise HIDError(
                 f"no permission on {self.device_path} – add the udev rule "
-                f"(see resourcen/battery-protocol.md, 'Permissions')"
+                f"(see resources/battery-protocol.md, 'Permissions')"
             ) from exc
         except OSError as exc:
             raise HIDError(f"cannot open {self.device_path}: {exc}") from exc
@@ -130,7 +168,12 @@ class HS80HID:
             except BlockingIOError:
                 time.sleep(0.005)
     def _read(self, timeout: float = READ_TIMEOUT) -> bytes | None:
-        """Read one 64-byte IN report; ``None`` on timeout."""
+        """Read one 64-byte IN report; ``None`` on timeout.
+
+        Callers must validate the returned report (see
+        :func:`_is_periodic_report`): the receiver emits periodic status
+        reports that are *not* responses to our queries.
+        """
         if self._fd is None:
             raise HIDError("device not open")
         deadline = time.monotonic() + timeout
@@ -143,7 +186,8 @@ class HS80HID:
                 continue
             except OSError as exc:
                 raise HIDError(f"read failed: {exc}") from exc
-            buf += chunk
+            if chunk:
+                buf += chunk
         return buf if len(buf) == MSG_SIZE_READ else None
 
     def _flush(self) -> None:
@@ -167,6 +211,11 @@ class HS80HID:
 
         Returns ``True`` when the headset is connected to the receiver,
         ``False`` otherwise (heartbeat read timed out).
+
+        The final read accepts any report *except* the receiver's known
+        periodic status reports (report ID ``PERIODIC_REPORT_ID``), which
+        arrive every ~5 s even when the headset is off and would make
+        this check a false positive.
         """
         # 1. Receiver firmware query
         self._write(bytes([0x00, 0x02, RECEIVER_ENDPOINT, 0x02, 0x13]))
@@ -178,23 +227,59 @@ class HS80HID:
         self._write(bytes([0x00, 0x02, HEADSET_ENDPOINT, 0x01, 0x03, 0x00, 0x02]))
         # 5. Flush pending IN reports
         self._flush()
-        # 6. Headset heartbeat → read response
-        self._write(bytes([0x00, 0x02, HEADSET_ENDPOINT, 0x02, 0x12]))
-        return self._read() is not None
+        # 6. Headset heartbeat → read response.
+        # We cannot use the strict ``QUERY_REPORT_ID`` filter here because
+        # the report ID of the genuine headset heartbeat response is not
+        # documented; excluding the *known* periodic reports is the safe
+        # middle ground.
+        resp = self._read()
+        if resp is None:
+            return False
+        return resp[0] != PERIODIC_REPORT_ID
+
+    def wake_with_retries(self) -> bool:
+        """Call :meth:`wake` up to ``WAKE_ATTEMPTS`` times.
+
+        The headset answers the control channel only in a short window after
+        it wakes up / reconnects, then goes quiet (periodic ``id=01`` reports
+        only).  A single :meth:`wake` call often misses that window, so we
+        retry with a short pause between attempts.  Returns ``True`` as soon as
+        any attempt succeeds.
+        """
+        for attempt in range(1, WAKE_ATTEMPTS + 1):
+            if self.wake():
+                return True
+            if attempt < WAKE_ATTEMPTS:
+                time.sleep(WAKE_RETRY_PAUSE)
+        return False
 
     def battery_percent(self) -> int | None:
-        """Query the headset battery level.
+        """Query the headset battery level (wakes the channel first).
 
         Returns an integer percentage (0–100), or ``None`` when the headset
         is not connected or the reading is implausible.
         """
         if not self.wake():
             return None
+        return self._battery_query()
+
+    def _battery_query(self) -> int | None:
+        """Battery query; assumes the channel is already woken up.
+
+        Responses are validated twice: the known periodic receiver report
+        patterns are rejected outright (they are not battery responses),
+        and the battery value must fall in ``1..1000`` (the reference
+        implementation's primary check, which also handles the
+        paired-headset-ID reply).
+        """
         self._flush()
         for _ in range(BATTERY_MAX_ATTEMPTS):
             self._write(bytes([0x00, 0x02, HEADSET_ENDPOINT, 0x02, 0x0F]))
             resp = self._read()
             if resp is None:
+                continue
+            if _is_periodic_report(resp):
+                # Periodic receiver status, not a battery answer – retry.
                 continue
             raw = resp[4] | (resp[5] << 8)
             if BATTERY_MIN <= raw <= BATTERY_MAX:
@@ -209,12 +294,31 @@ class HS80HID:
         """
         if not self.wake():
             return None
+        return self._mic_query()
+
+    def _mic_query(self) -> bool | None:
+        """Mic query; assumes the channel is already woken up.
+
+        Periodic receiver reports are rejected, so a missing headset cannot
+        masquerade as a mic state.
+        """
         self._flush()
         self._write(bytes([0x00, 0x02, HEADSET_ENDPOINT, 0x02, 0xA6]))
         resp = self._read()
-        if resp is None:
+        if resp is None or _is_periodic_report(resp):
             return None
         return resp[4] == 0x01
+
+    def status(self) -> tuple[int | None, bool | None]:
+        """One handshake, then battery + mic queries in a single cycle.
+
+        Used by the poller: a single ``wake()`` per cycle instead of one
+        per query.  Matters when the headset is off – each query without a
+        prior shared wake would burn its full read timeout.
+        """
+        if not self.wake_with_retries():
+            return None, None
+        return self._battery_query(), self._mic_query()
 
 
 def selftest() -> int:
@@ -227,8 +331,7 @@ def selftest() -> int:
         log.error("%s", exc)
         return 1
     try:
-        bat = hid.battery_percent()
-        mic = hid.mic_muted()
+        bat, mic = hid.status()
         log.info("battery: %s", f"{bat} %" if bat is not None else "unavailable")
         log.info("mic muted: %s", mic)
         return 0

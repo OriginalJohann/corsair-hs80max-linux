@@ -53,12 +53,29 @@ def _configure_logging() -> None:
 
 
 class Poller:
-    """Background thread keeping the published status up to date."""
+    """Background thread keeping the published status up to date.
+
+    Battery, mic state and connection mode are *sticky*: each is updated only
+    when the device reports a fresh value (battery / mic) or the connection
+    mode changes, and otherwise holds its last known value.  This matches how
+    the headset behaves in practice – it answers the control channel only in
+    a short window after it wakes up / reconnects and is quiet most of the
+    time – so the published values stay stable and readable instead of
+    flapping to ``-1`` / ``False`` on every failed handshake.
+
+    ``disconnected`` is only entered on a *physical* disconnect (dongle
+    unplugged, no audio interface); a mere control-channel timeout does not
+    drop the connection state.
+    """
 
     def __init__(self, service: HS80Service) -> None:
         self._service = service
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # Sticky state: last known values (None = never observed yet).
+        self._battery: int | None = None
+        self._mic_muted: bool | None = None
+        self._mode: str = "disconnected"
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="hs80max-poller", daemon=True)
@@ -72,37 +89,63 @@ class Poller:
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
-                mode = connection.connection_mode()
-                battery, mic_muted = (-1, False)
-                if mode != "disconnected":
-                    battery, mic_muted = self._query_hid()
-                self._service.publish(Status(mode, battery, mic_muted))
+                self._poll_once()
             except Exception:  # keep the daemon alive on transient errors
                 log.exception("poll iteration failed")
             self._stop.wait(MODE_POLL_INTERVAL)
 
-    def _query_hid(self) -> tuple[int, bool]:
-        """Read battery + mic state; returns (-1, False) when unavailable."""
+    def _poll_once(self) -> None:
+        # 1. Connection mode (fast, PipeWire/USB based).
+        mode = connection.connection_mode()
+        if mode == "disconnected":
+            # Physical disconnect: the headset is gone, so the last battery /
+            # mic values are no longer meaningful.  Reset them to "unknown".
+            self._mode = "disconnected"
+            self._battery = None
+            self._mic_muted = None
+        else:
+            self._mode = mode
+            # 2. Try to refresh battery + mic (only when the channel answers).
+            self._refresh_hid()
+
+        # 3. Publish the sticky state (unknown values map to -1 / False).
+        self._service.publish(Status(
+            self._mode,
+            -1 if self._battery is None else self._battery,
+            False if self._mic_muted is None else self._mic_muted,
+        ))
+
+    def _refresh_hid(self) -> None:
+        """Refresh battery + mic; keep the last known value on failure."""
         try:
             hid = HS80HID()
             hid.open()
             try:
-                battery = hid.battery_percent()
-                mic = hid.mic_muted()
+                battery, mic = hid.status()
             finally:
                 hid.close()
-            return (battery if battery is not None else -1,
-                    mic if mic is not None else False)
         except HIDError as exc:
             log.warning("HID query failed: %s", exc)
-            return -1, False
+            return
+        # Update only the values the headset actually reported this cycle.
+        if battery is not None:
+            self._battery = battery
+        if mic is not None:
+            self._mic_muted = mic
 
 
 def main() -> int:
     _configure_logging()
     bus = SessionBus()
     try:
-        bus.request_name(BUS_NAME)
+        # request_name with replace=True so that, if a stale instance of
+        # this service is still holding the bus name (e.g. after an unclean
+        # shutdown), this instance takes ownership instead of raising
+        # "name already exists on the bus" and crash-looping. allow_
+        # replacement=True lets a *newer* instance take over from this
+        # one as well, so the always-newest instance wins and the daemon
+        # self-heals rather than failing.
+        bus.request_name(BUS_NAME, allow_replacement=True, replace=True)
     except Exception:
         log.exception("could not register D-Bus name %s", BUS_NAME)
         return 1

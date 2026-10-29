@@ -1,6 +1,6 @@
 """Connection-mode detection for the HS80 Max.
 
-Three observable states (see resourcen/battery-protocol.md):
+Three observable states (see resources/battery-protocol.md):
 
 * ``disconnected`` – the wireless dongle (1b1c:0a97) is not present.
 * ``wired``        – the headset is plugged directly into the PC via USB-C:
