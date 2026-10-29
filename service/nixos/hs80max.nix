@@ -13,9 +13,8 @@
 #   2. D-Bus session policy – allows owning com.corsair.hs80max
 #   3. systemd user unit – starts the Python daemon at login
 #
-# After `nixos-rebuild switch`, enable the user service:
-#   systemctl --user daemon-reload
-#   systemctl --user enable --now hs80max
+# After `nixos-rebuild switch` the user service is restarted automatically by an
+# activation script (see below), so no manual `systemctl --user` is needed.
 
 { config, lib, pkgs, ... }:
 
@@ -52,8 +51,33 @@ in
       SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="0a97", MODE="0660", GROUP="users"
     '';
 
-    # Make the wrapper script available system-wide.
-    environment.systemPackages = [ wrapper ];
+    # ------------------------------------------------- auto-restart on switch
+    # `nixos-rebuild switch` does NOT restart systemd *user* services (a known
+    # NixOS gap), so the running unit would keep the previous store path until
+    # the next login. This activation script restarts the service on every
+    # switch, so it always tracks the current build.
+    #
+    # Only `stop`+`start` (never a bare `start`): `start` is a no-op when the
+    # unit is already active, so the old instance would survive as a duplicate
+    # fighting over the D-Bus name. `stop` first guarantees a single instance.
+    #
+    # `systemctl` is referenced by absolute path: the activation context and the
+    # `runuser`'d user environment do not reliably have the NixOS store bin dir
+    # on `PATH`, so a bare `systemctl` (or `env … systemctl`) fails with
+    # "file not found". `runuser` also resets the target user's environment
+    # (PATH, etc.), so `XDG_RUNTIME_DIR` is set *inside* each invocation via an
+    # absolute `env`, guaranteeing the user bus is found. Skipped when the user
+    # session is not running (logged out / server boot).
+    system.activationScripts.hs80max-restart.text = ''
+      set -e
+      if id -u fne >/dev/null 2>&1 && [ -d /run/user/1000 ]; then
+        env=/run/current-system/sw/bin/env
+        systemctl=/run/current-system/sw/bin/systemctl
+        runuser -u fne -- "$env" XDG_RUNTIME_DIR=/run/user/1000 "$systemctl" --user daemon-reload
+        runuser -u fne -- "$env" XDG_RUNTIME_DIR=/run/user/1000 "$systemctl" --user stop hs80max.service
+        runuser -u fne -- "$env" XDG_RUNTIME_DIR=/run/user/1000 "$systemctl" --user start hs80max.service
+      fi
+    '';
 
     # ------------------------------------------------------- D-Bus session
     # Install the session-bus policy file so the user can own the bus name.

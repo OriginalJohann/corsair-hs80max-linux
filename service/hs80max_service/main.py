@@ -1,6 +1,6 @@
 """HS80 Max status service – daemon entry point.
 
-Polls the connection mode (PipeWire/USB) and the headset battery level
+Polls the connection mode (dongle presence) and the headset battery level
 (HID protocol) on a timer and publishes the results on the session bus
 (``com.corsair.hs80max``).
 
@@ -64,8 +64,8 @@ class Poller:
     flapping to ``-1`` / ``False`` on every failed handshake.
 
     ``disconnected`` is only entered on a *physical* disconnect (dongle
-    unplugged, no audio interface); a mere control-channel timeout does not
-    drop the connection state.
+    unplugged); a mere control-channel timeout does not drop the
+    connection state.
     """
 
     def __init__(self, service: HS80Service) -> None:
@@ -95,15 +95,16 @@ class Poller:
             self._stop.wait(MODE_POLL_INTERVAL)
 
     def _poll_once(self) -> None:
-        # 1. Connection mode (fast, PipeWire/USB based).
+        # 1. Connection mode (fast, dongle-presence based).
         mode = connection.connection_mode()
         if mode == "disconnected":
-            # Physical disconnect: the headset is gone, so the last battery /
-            # mic values are no longer meaningful.  Reset them to "unknown".
+            # The dongle is unplugged, so the last battery / mic values are
+            # no longer meaningful.  Reset them to "unknown".
             self._mode = "disconnected"
             self._battery = None
             self._mic_muted = None
         else:
+            # Connected (dongle in): refresh battery + mic from the dongle.
             self._mode = mode
             # 2. Try to refresh battery + mic (only when the channel answers).
             self._refresh_hid()
