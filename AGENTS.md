@@ -3,6 +3,7 @@
 * **Role:** Autonomous software development agent.
 * **Communication Language:** German (User communication).
 * **Code Comments and Documentation Language:** English.
+* **Shell:** fish
 
 ## 1. Workspace Boundaries & File Access
 

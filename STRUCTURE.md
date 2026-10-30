@@ -11,7 +11,7 @@ corsair-hs80max-linux/
 ├── STRUCTURE.md               # This file – keep in sync with changes
 ├── plans/
 │   └── hs80max-development.md # Development plan & progress tracking
-├── ressources/
+├── resources/
 │   ├── battery-protocol.md    # HS80 Max HID battery protocol (verified)
 │   ├── produktblatt.pdf       # Product datasheet
 │   ├── reference_corsair_device.hpp     # Protocol reference (Sapd/HeadsetControl)
@@ -33,18 +33,20 @@ corsair-hs80max-linux/
 │   └── test_dbus.sh           # E2E D-Bus test script
 ├── extension/                 # GNOME Shell extension (Shell 50) – Phase 2
 │   ├── metadata.json
-│   ├── main.js
+│   ├── main.js                # D-Bus client (com.corsair.hs80max) + tray UI
+│   ├── style.css
 │   └── icons/
 │       ├── headset-disconnected-symbolic.svg
 │       ├── headset-connected-symbolic.svg
-│       └── headset-wireless-symbolic.svg
+│       ├── mic-mute-symbolic.svg
+│       └── mic-unmute-symbolic.svg
 └── scratchpad/                # Temporary files (deleted before final commit)
 ```
 
 ## Key Facts
 
 - Dongle: USB `1b1c:0a97`, HID control on **interface 4** → `/dev/hidraw1`
-- Battery: proprietary HID protocol (see `ressources/battery-protocol.md`), no USB Battery SUD
+- Battery: proprietary HID protocol (see `resources/battery-protocol.md`), no USB Battery SUD
 - D-Bus service name: `com.corsair.hs80max` (session bus)
 - Volume app: `pavucontrol`
 - Extension UUID: `hs80max@fne.dev`

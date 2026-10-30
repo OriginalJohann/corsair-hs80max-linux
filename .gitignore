@@ -3,3 +3,5 @@ scratchpad/*
 __pycache__/
 *.pyc
 .vscode/
+tmp*
+.agents/*

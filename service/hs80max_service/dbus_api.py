@@ -13,7 +13,9 @@ Built on ``pydbus`` (available in ``shells/dev.nix``).
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -113,6 +115,35 @@ class HS80Service:
     def GetMicMuted(self) -> bool:
         return self._status.mic_muted
 
+    # ------------------------------------------------------ status file
+    # This GJS build cannot deliver D-Bus signals to the extension (the
+    # signal_subscribe wrapper drops callbacks), so the extension watches a
+    # status file with a GFile monitor for live updates. We (re)write it
+    # atomically on every status change.
+    @property
+    def _status_file_path(self) -> str:
+        runtime = os.environ.get(
+            "XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}",
+        )
+        return os.path.join(runtime, "hs80max", "status.json")
+
+    def _write_status_file(self) -> None:
+        path = self._status_file_path
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            payload = {
+                "mode": self._status.mode,
+                "battery": self._status.battery,
+                "mic_muted": self._status.mic_muted,
+                "updated_at": int(self._status.updated_at * 1000),
+            }
+            tmp = f"{path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            os.replace(tmp, path)  # atomic: watchers never see a partial file
+        except OSError as e:
+            log.warning("failed to write status file: %s", e)
+
     # -------------------------------------------------------------- update
     def publish(self, status: Status) -> bool:
         """Store a new status; emit StatusChanged only on changes.
@@ -130,15 +161,18 @@ class HS80Service:
                 status.mode, status.battery, status.mic_muted,
             )
             self._status = status
-            # Emit D-Bus signal from the main loop to avoid deadlocks.
-            # publish() is called from the Poller thread; dispatching here
-            # ensures the signal emission runs in the GLib main-loop context.
-            # pydbus's ObjectWrapper auto-connects StatusChanged to the bus.
-            GLib.idle_add(
-                lambda: self.StatusChanged(
-                    status.mode, status.battery, status.mic_muted,
-                )
+            # Emit the D-Bus signal directly from the Poller thread.
+            # pydbus's DbusSignal.__call__ -> g_dbus_connection_send_message
+            # is thread-safe per the GLib docs, so no dispatch to the main
+            # loop is needed.  (GLib.idle_add from a non-main thread is
+            # undefined behaviour and silently drops the source – the
+            # original bug that caused the extension icon to go stale.)
+            self.StatusChanged(
+                status.mode, status.battery, status.mic_muted,
             )
+            # Also update the status file so the extension's GFile monitor
+            # fires (D-Bus signals are not delivered by this GJS build).
+            self._write_status_file()
         else:
             # Keep the timestamp fresh even without value changes.
             self._status = Status(

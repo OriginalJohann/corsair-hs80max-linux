@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="#bebebe">
+  <!-- Microphone, unmuted: capsule with stand and base. -->
+  <path d="M8 1a2.2 2.2 0 0 1 2.2 2.2v3.6a2.2 2.2 0 0 1-4.4 0V3.2A2.2 2.2 0 0 1 8 1z"/>
+  <path d="M4.4 5.4a3.6 3.6 0 0 0 7.2 0h1a4.6 4.6 0 0 1-4.2 4.59V12h1.4v1H6.2v-1h1.4V10.1A4.6 4.6 0 0 1 3.4 5.4z"/>
+</svg>

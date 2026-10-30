@@ -1,0 +1,18 @@
+/* Corsair HS80 Max - GNOME Shell extension styles */
+
+/* The two status icons (connection + mic) shown side by side in the panel. */
+.hs80max-icon-box {
+    padding: 0 2px;
+}
+
+/* Individual panel status icon (connection / microphone). */
+.hs80max-icon {
+    -StIcon-icon-size: 16px;
+    margin: 0 1px;
+}
+
+/* The battery percentage label rendered by the status button. */
+.hs80max-label {
+    font-size: 0.9em;
+    margin: 0 4px;
+}
