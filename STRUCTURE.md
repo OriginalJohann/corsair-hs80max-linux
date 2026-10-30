@@ -7,10 +7,10 @@ connection status, battery level, and volume-app integration in the GNOME systra
 corsair-hs80max-linux/
 ├── AGENTS.md                  # Agent instructions & workflow guidelines
 ├── INSTRUCTIONS.md            # Original task specification
+├── NIXOS-SETUP.md             # Guide: module integration into a flake NixOS config
 ├── README.md                  # Project overview (updated in Phase 3)
 ├── STRUCTURE.md               # This file – keep in sync with changes
-├── plans/
-│   └── hs80max-development.md # Development plan & progress tracking
+├── plans/                     # Planning files (currently empty)
 ├── resources/
 │   ├── battery-protocol.md    # HS80 Max HID battery protocol (verified)
 │   ├── produktblatt.pdf       # Product datasheet
@@ -28,7 +28,7 @@ corsair-hs80max-linux/
 │   ├── dbus/
 │   │   └── com.corsair.hs80max.conf  # D-Bus session policy
 │   ├── nixos/
-│   │   └── hs80max.nix        # NixOS module (udev + D-Bus + user service)
+│   │   └── hs80max.nix        # NixOS module (udev + D-Bus + user service + GNOME extension)
 │   ├── hs80max.service        # systemd user unit
 │   └── test_dbus.sh           # E2E D-Bus test script
 ├── extension/                 # GNOME Shell extension (Shell 50) – Phase 2

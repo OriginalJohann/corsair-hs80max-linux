@@ -1,4 +1,4 @@
-# NixOS module for the HS80 Max status service.
+# NixOS module for the HS80 Max status service + GNOME Shell extension.
 #
 # Add to your NixOS configuration (use a path Nix can resolve):
 #   imports = [ /path/to/corsair-hs80max-linux/service/nixos/hs80max.nix ];
@@ -12,6 +12,7 @@
 #   1. udev rule  – user read/write access to the HS80 MAX receiver hidraw node
 #   2. D-Bus session policy – allows owning com.corsair.hs80max
 #   3. systemd user unit – starts the Python daemon at login
+#   4. GNOME Shell extension – installed into the user's extensions dir
 #
 # After `nixos-rebuild switch` the user service is restarted automatically by an
 # activation script (see below), so no manual `systemctl --user` is needed.
@@ -22,9 +23,11 @@ let
   cfg = config.services.hs80max;
 
   # Paths are relative to this file (service/nixos/hs80max.nix).
-  # ./..  →  service/
-  serviceDir = ./..;
-  dbusConf   = ../dbus/com.corsair.hs80max.conf;
+  # ./..   →  service/
+  # ../../ →  repo root
+  serviceDir   = ./..;
+  extensionDir = ../../extension;
+  dbusConf     = ../dbus/com.corsair.hs80max.conf;
 
   # Python environment with required third-party packages.
   pythonEnv = pkgs.python3.withPackages (ps: [
@@ -43,6 +46,13 @@ in
 {
   options.services.hs80max.enable =
     lib.mkEnableOption "Corsair HS80 Max status service";
+
+  options.services.hs80max.user =
+    lib.mkOption {
+      type = lib.types.str;
+      default = "fne";
+      description = "User whose home the GNOME extension is installed into";
+    };
 
   config = lib.mkIf cfg.enable {
     # ------------------------------------------------------------------ udev
@@ -70,13 +80,13 @@ in
     # session is not running (logged out / server boot).
     system.activationScripts.hs80max-restart.text = ''
       set -e
-      if id -u fne >/dev/null 2>&1 && [ -d /run/user/1000 ]; then
-        env=/run/current-system/sw/bin/env
-        systemctl=/run/current-system/sw/bin/systemctl
-        runuser -u fne -- "$env" XDG_RUNTIME_DIR=/run/user/1000 "$systemctl" --user daemon-reload
-        runuser -u fne -- "$env" XDG_RUNTIME_DIR=/run/user/1000 "$systemctl" --user stop hs80max.service
-        runuser -u fne -- "$env" XDG_RUNTIME_DIR=/run/user/1000 "$systemctl" --user start hs80max.service
-      fi
+      uid=$(id -u ${cfg.user} 2>/dev/null) || exit 0
+      [ -d /run/user/$uid ] || exit 0
+      env=/run/current-system/sw/bin/env
+      systemctl=/run/current-system/sw/bin/systemctl
+      runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user daemon-reload
+      runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user stop hs80max.service || true
+      runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user start hs80max.service
     '';
 
     # ------------------------------------------------------- D-Bus session
@@ -107,5 +117,19 @@ in
         RestartSec = 5;
       };
     };
+
+    # ------------------------------------------------------- GNOME extension
+    # The extension is plain source files (not a built package), so NixOS's
+    # `gnome.gnome-shell.extensions` list cannot be used. It is installed the
+    # same way as the D-Bus policy above: an activation script copies it into
+    # the user's extensions directory, where GNOME finds it by the UUID in
+    # metadata.json. The destination is resolved from the user's `home`
+    # option (default /home/<user>), so non-standard homes work too. The
+    # shell picks the new files up on the next restart (Alt+F2 → r).
+    system.activationScripts.hs80max-extension.text = ''
+      extDir=$(dirname $(readlink -f ${config.users.users.${cfg.user}.home or "/home/${cfg.user}"}))/gnome-shell/extensions/hs80max@fne.dev
+      mkdir -p "$extDir"
+      cp -r ${extensionDir}/. "$extDir"/
+    '';
   };
 }
