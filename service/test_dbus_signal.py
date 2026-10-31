@@ -78,7 +78,8 @@ def test_publish_from_non_main_thread_emits_signal_once() -> None:
     main_thread_id = threading.get_ident()
 
     # Baseline: publish the default status (no change expected).
-    svc.publish(Status(mode="disconnected", battery=-1, mic_muted=False))
+    # The service default is mic_muted=True (unknown state reads as muted).
+    svc.publish(Status(mode="disconnected", battery=-1, mic_muted=True))
     assert recorder.calls == [], f"unexpected baseline emission: {recorder.calls}"
 
     # Simulate the Poller thread publishing a CHANGED status.
@@ -86,7 +87,7 @@ def test_publish_from_non_main_thread_emits_signal_once() -> None:
 
     def poller_work() -> None:
         try:
-            svc.publish(Status(mode="disconnected", battery=-1, mic_muted=True))
+            svc.publish(Status(mode="disconnected", battery=-1, mic_muted=False))
         except Exception as exc:  # pragma: no cover - defensive
             errors.append(f"publish() raised: {exc!r}")
 
@@ -97,7 +98,7 @@ def test_publish_from_non_main_thread_emits_signal_once() -> None:
 
     assert not errors, errors
     assert len(recorder.calls) == 1, f"expected 1 signal, got {recorder.calls!r}"
-    assert recorder.calls[0] == ("disconnected", -1, True), recorder.calls[0]
+    assert recorder.calls[0] == ("disconnected", -1, False), recorder.calls[0]
     # The signal must have been emitted from the non-main (poller) thread,
     # proving the direct (non-idle_add) emission path is what runs.
     assert recorder.caller_threads[0] != main_thread_id, (

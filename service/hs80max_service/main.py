@@ -66,6 +66,12 @@ class Poller:
     ``disconnected`` is only entered on a *physical* disconnect (dongle
     unplugged); a mere control-channel timeout does not drop the
     connection state.
+
+    A *powered-off* headset is a third, distinct state: the dongle stays
+    plugged in (USB) while the headset is off, so dongle presence alone
+    cannot express it.  Per the verified protocol the headset answers the
+    handshake heartbeat only when it is on, so ``off`` is entered whenever
+    the shared wake handshake fails and left as soon as one succeeds.
     """
 
     def __init__(self, service: HS80Service) -> None:
@@ -76,6 +82,11 @@ class Poller:
         self._battery: int | None = None
         self._mic_muted: bool | None = None
         self._mode: str = "disconnected"
+        # Last known headset power state (only meaningful while the dongle
+        # is plugged in); the first publish after a dongle insertion is
+        # always preceded by a fresh handshake, so the initial value is
+        # never published.
+        self._headset_on: bool = False
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="hs80max-poller", daemon=True)
@@ -104,30 +115,48 @@ class Poller:
             self._battery = None
             self._mic_muted = None
         else:
-            # Connected (dongle in): refresh battery + mic from the dongle.
-            self._mode = mode
-            # 2. Try to refresh battery + mic (only when the channel answers).
+            # Dongle in: refresh headset power state + battery + mic.
+            # 2. Try to refresh (only when the channel answers).
             self._refresh_hid()
+            # ``headset_on`` means "awake": the handshake answered *or* a
+            # fresh battery reading came back; "off" only when the
+            # handshake failed and no battery reading is available.
+            # Per-cycle fact, not sticky.
+            self._mode = "connected" if self._headset_on else "off"
 
-        # 3. Publish the sticky state (unknown values map to -1 / False).
+        # 3. Publish the sticky state (unknown values map to -1 / muted).
         self._service.publish(Status(
             self._mode,
             -1 if self._battery is None else self._battery,
-            False if self._mic_muted is None else self._mic_muted,
+            # Unknown mic state reads as *muted*: the headset is normally
+            # started with the mic off, so an unreadable state must not be
+            # displayed as an open microphone.
+            True if self._mic_muted is None else self._mic_muted,
         ))
 
     def _refresh_hid(self) -> None:
-        """Refresh battery + mic; keep the last known value on failure."""
+        """Refresh power state, battery and mic.
+
+        ``headset_on`` reflects *this* cycle: "on" when the handshake
+        answered or a fresh battery reading came back, "off" otherwise.
+        Battery and mic keep their last known values when a single query
+        fails.
+        """
         try:
             hid = HS80HID()
             hid.open()
             try:
-                battery, mic = hid.status()
+                headset_on, battery, mic = hid.status()
             finally:
                 hid.close()
         except HIDError as exc:
             log.warning("HID query failed: %s", exc)
+            # The dongle is present but the control channel could not be
+            # opened at all: treat the headset as unreachable (off) for
+            # this cycle.
+            self._headset_on = False
             return
+        self._headset_on = headset_on
         # Update only the values the headset actually reported this cycle.
         if battery is not None:
             self._battery = battery

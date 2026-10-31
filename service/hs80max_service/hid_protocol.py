@@ -309,16 +309,29 @@ class HS80HID:
             return None
         return resp[4] == 0x01
 
-    def status(self) -> tuple[int | None, bool | None]:
+    def status(self) -> tuple[bool, int | None, bool | None]:
         """One handshake, then battery + mic queries in a single cycle.
 
         Used by the poller: a single ``wake()`` per cycle instead of one
         per query.  Matters when the headset is off – each query without a
         prior shared wake would burn its full read timeout.
+
+        Returns ``(headset_on, battery, mic)``.  The battery query decides
+        "on": a fresh reading in 1..1000 can only come from an awake
+        headset, so it always wins.  The handshake heartbeat is only a
+        fallback for that – it is not reliable on its own, because the
+        headset answers the control channel only shortly after it wakes
+        up / reconnects and then goes quiet (periodic ``id=01`` reports
+        only), so a steady-on headset frequently misses the heartbeat
+        window.  (Off case: handshake fails *and* the battery query times
+        out → ``False, None, None`` as before.)
         """
-        if not self.wake_with_retries():
-            return None, None
-        return self._battery_query(), self._mic_query()
+        on = self.wake_with_retries()
+        battery = self._battery_query()
+        mic = self._mic_query()
+        if battery is not None:
+            on = True
+        return on, battery, mic
 
 
 def selftest() -> int:
@@ -331,7 +344,8 @@ def selftest() -> int:
         log.error("%s", exc)
         return 1
     try:
-        bat, mic = hid.status()
+        ok, bat, mic = hid.status()
+        log.info("headset on: %s", ok)
         log.info("battery: %s", f"{bat} %" if bat is not None else "unavailable")
         log.info("mic muted: %s", mic)
         return 0

@@ -1,8 +1,8 @@
 // Corsair HS80 Max Status - GNOME Shell 50 extension.
 //
-// Shows *two* small symbolic icons in the top bar (per spec: "two small icons
-// next to each other"): a connection icon (headset connected / disconnected)
-// and a microphone icon (mic muted / unmuted), followed by the battery
+// Shows two small symbolic icons in the top bar: a connection icon
+// (headset connected / headset off / not connected) and a microphone icon
+// (mic muted / unmuted), followed by the battery
 // percentage as the button label. Clicking the button opens a popup with the
 // connection mode, battery level and microphone state, plus a menu entry to
 // launch pavucontrol (the system volume mixer).
@@ -109,7 +109,7 @@ export default class Hs80MaxExtension extends Extension {
     enable() {
         this._mode = 'disconnected';
         this._battery = -1;
-        this._micMuted = false;
+        this._micMuted = true;
         this._updatedAt = 0;
         this._wasReachable = false;
 
@@ -231,7 +231,7 @@ export default class Hs80MaxExtension extends Extension {
             'y_align': 0.5,
         });
         this._micIcon = new St.Icon({
-            'gicon': this._loadIcon(ICON_MIC_UNMUTED),
+            'gicon': this._loadIcon(ICON_MIC_MUTED),
             'style_class': 'hs80max-icon',
             'width': ICON_SIZE,
             'height': ICON_SIZE,
@@ -342,13 +342,18 @@ export default class Hs80MaxExtension extends Extension {
 
 
     // Refresh the status summary + the detailed rows (mode / battery / mic /
-    // last update) inside the menu. Any mode other than "disconnected"
-    // (e.g. "connected" / "wireless") is treated as "verbunden".
+    // last update) inside the menu. Only "connected" with a valid battery
+    // reading counts as "verbunden"; the headset being powered off ("off"
+    // mode, battery -1) and the dongle being unplugged / daemon unreachable
+    // both present as "not connected".
     _updateMenuStatus() {
         if (!this._menuStatus)
             return;
 
-        const connected = this._mode !== 'disconnected';
+        // A battery of -1 (no reading possible) means the headset is off, so
+        // it must not be presented as connected even if Mode lags behind.
+        const connected = (this._mode === 'connected' && this._battery >= 0);
+        const off = (this._mode === 'off');
         const batteryText = this._battery >= 0 ? this._battery + ' %' : '-- %';
 
         // Summary line.
@@ -356,16 +361,18 @@ export default class Hs80MaxExtension extends Extension {
         if (connected) {
             summary = 'Verbunden · ' + batteryText
                 + (this._micMuted ? ' · Mikro stumm' : '');
+        } else if (off) {
+            summary = 'Headset aus';
         } else {
-            summary = 'Getrennt';
+            summary = 'Nicht verbunden';
         }
         this._menuStatus.label.set_text(summary);
 
         // Detailed rows.
         if (this._menuMode)
             this._menuMode.label.set_text(
-                'Modus: ' + (connected ? 'verbunden (' + this._mode + ')'
-                    : 'getrennt'));
+                'Modus: ' + (connected ? 'verbunden'
+                    : (off ? 'aus (Dongle verbunden)' : 'getrennt')));
         if (this._menuBattery)
             this._menuBattery.label.set_text('Akku: ' + batteryText);
         if (this._menuMic)
@@ -461,7 +468,7 @@ export default class Hs80MaxExtension extends Extension {
                     battery: typeof dict['Battery'] === 'number'
                         ? dict['Battery'] : -1,
                     micMuted: typeof dict['MicMuted'] === 'boolean'
-                        ? dict['MicMuted'] : false,
+                        ? dict['MicMuted'] : true,
                     updatedAt: typeof dict['UpdatedAt'] === 'number'
                         ? dict['UpdatedAt'] : 0,
                 };
@@ -581,14 +588,18 @@ export default class Hs80MaxExtension extends Extension {
     }
 
     // Update the two panel icons from the current state. The connection icon
-    // tracks `Mode` (anything but "disconnected" counts as connected); the mic
-    // icon tracks `MicMuted` and is only meaningful while connected. Icons are
-    // swapped via set_gicon() using absolute file icons (see _loadIcon).
+    // tracks `Mode`: only "connected" (headset powered on) shows the
+    // connected headset; "off" (headset powered off) and "disconnected"
+    // (dongle unplugged / daemon unreachable) both read as "not connected".
+    // The mic icon tracks `MicMuted` and is only meaningful while connected.
+    // Icons are swapped via set_gicon() using absolute file icons (see _loadIcon).
     _updateIcons() {
         if (!this._connectionIcon || !this._micIcon)
             return;
 
-        const connected = (this._mode !== 'disconnected');
+        // A battery of -1 (no reading possible) means the headset is off, so
+        // it must not be presented as connected even if Mode lags behind.
+        const connected = (this._mode === 'connected' && this._battery >= 0);
         const connectionName = connected ? ICON_CONNECTED : ICON_DISCONNECTED;
         const micName = connected
             ? (this._micMuted ? ICON_MIC_MUTED : ICON_MIC_UNMUTED)

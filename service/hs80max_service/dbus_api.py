@@ -2,7 +2,8 @@
 
 Exposes ``com.corsair.hs80max`` on the session bus with:
 
-* Properties: ``Mode`` (s), ``Battery`` (i, -1 = unavailable),
+* Properties: ``Mode`` (s: ``disconnected`` | ``off`` | ``connected``),
+  ``Battery`` (i, -1 = unavailable),
   ``MicMuted`` (b), ``UpdatedAt`` (t, epoch ms)
 * Methods:    ``GetStatus() -> a{sv}``, ``GetBattery() -> i``,
               ``GetMicMuted() -> b``
@@ -60,9 +61,9 @@ INTROSPECTION_XML = """
 class Status:
     """Current headset status snapshot."""
 
-    mode: str = "disconnected"
+    mode: str = "disconnected"  # disconnected | off | connected
     battery: int = -1  # percent 0..100, -1 = unavailable
-    mic_muted: bool = False
+    mic_muted: bool = True  # unknown state reads as muted (headset starts muted)
     updated_at: float = field(default_factory=time.time)
 
 
