@@ -33,7 +33,10 @@ corsair-hs80max-linux/
 │   └── test_dbus.sh           # E2E D-Bus test script
 ├── extension/                 # GNOME Shell extension (Shell 50) – Phase 2
 │   ├── metadata.json
-│   ├── main.js                # D-Bus client (com.corsair.hs80max) + tray UI
+│   ├── extension.js           # D-Bus client (com.corsair.hs80max) + tray UI
+│   │                          # (PanelMenu.Button via Main.panel.addToStatusArea,
+│   │                          #  left box, like the appindicator extension)
+│   ├── main.js                # Re-export shim (upstream builds load main.js)
 │   ├── style.css
 │   └── icons/
 │       ├── headset-disconnected-symbolic.svg

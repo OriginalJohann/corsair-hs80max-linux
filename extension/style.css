@@ -10,9 +10,3 @@
     -StIcon-icon-size: 16px;
     margin: 0 1px;
 }
-
-/* The battery percentage label rendered by the status button. */
-.hs80max-label {
-    font-size: 0.9em;
-    margin: 0 4px;
-}

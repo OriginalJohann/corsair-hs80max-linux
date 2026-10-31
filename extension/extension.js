@@ -30,10 +30,10 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
-import Clutter from 'gi://Clutter';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 const BUS_NAME = 'com.corsair.hs80max';
@@ -117,7 +117,6 @@ export default class Hs80MaxExtension extends Extension {
         this._connectionIcon = null;
         this._micIcon = null;
         this._statusButton = null;
-        this._clickGesture = null;
         this._menu = null;
         this._menuStatus = null;
         this._menuMode = null;
@@ -147,11 +146,8 @@ export default class Hs80MaxExtension extends Extension {
             this._ensureDaemon();
             // Read once now, then react to StatusChanged and a 30-min fallback.
             this._readStatus();
-            console.log('hs80max: DBG after readStatus');
             this._startSignalMatch();
-            console.log('hs80max: DBG after startSignalMatch');
             this._startPolling();
-            console.log('hs80max: DBG after startPolling');
         } catch (e) {
             console.warn('hs80max: enable failed: ' + e.message);
         }
@@ -181,37 +177,6 @@ export default class Hs80MaxExtension extends Extension {
         const file = Gio.file_new_for_uri(uri);
         return new Gio.FileIcon({ file });
     }
-
-    // Resolve the right-hand status container of the top bar. In this shell
-    // build `Main.panel._rightBox` is not exposed, so we fall back to walking
-    // `Main.panel.box` and picking the last horizontal box whose children do
-    // not all x_expand (that skips the centre clock box). Appending to it lets
-    // our indicator order dynamically next to the other status icons.
-    _panelStatusContainer() {
-        const panel = Main.panel;
-        if (!panel)
-            return null;
-        if (panel._rightBox)
-            return panel._rightBox;
-
-        const box = panel.box;
-        if (box && box.get_children) {
-            const children = box.get_children();
-            for (let i = children.length - 1; i >= 0; i--) {
-                const c = children[i];
-                if (!c || !c.get_children)
-                    continue;
-                const kids = c.get_children();
-                if (kids.length === 0)
-                    continue;
-                const allExpand = kids.every((k) => k && k.x_expand);
-                if (!allExpand)
-                    return c;
-            }
-        }
-        return box || null;
-    }
-
 
     _createStatusIcon() {
         // Re-entrancy guard: if a previous status icon is still around
@@ -245,59 +210,38 @@ export default class Hs80MaxExtension extends Extension {
         this._iconBox.add_child(this._connectionIcon);
         this._iconBox.add_child(this._micIcon);
 
-        // Create the panel button as a plain St.Button. This is the reliable
-        // path: in GNOME Shell 50 a PanelMenu.Button added to the panel's
-        // right box gets wrapped in an St.Bin that is never laid out (0x0,
-        // unmapped), so it never renders. A plain St.Button with the
-        // "status-button" style class renders identically to the shell's own
-        // status indicators (verified).
-        const button = new St.Button({ label: '' });
-        // style_classes is not accepted in the St.Button constructor in this
-        // shell version, so add the class directly.
-        try { button.add_style_class('status-button'); }
-        catch (e) { /* cosmetic */ }
-        button.x_expand = false;
-        button.y_expand = true;
-        // A Clutter.ClickGesture is what turns a click on the button into a
-        // menu open/close - exactly how the shell's own PanelMenuButton works
-        // (verified against GNOME Shell 50's panelMenu.js). The menu is
-        // created eagerly below; the handler toggles it (a click before the
-        // menu exists is a harmless no-op).
-        this._clickGesture = new Clutter.ClickGesture();
-        this._clickGesture.set_recognize_on_press(true);
-        this._clickGesture.connect('recognize', () => {
-            if (this._menu)
-                this._menu.toggle();
-        });
-        button.add_action(this._clickGesture);
-        // The button renders through its `child`; the icon box becomes the
-        // content so the panel shows "<headset icon><mic icon><battery %>".
-        button.child = this._iconBox;
+        // Create the panel button as a PanelMenu.Button - the same widget
+        // class the shell's own status indicators and the Ubuntu
+        // appindicator extension use, and the type the shell's
+        // `Panel.addToStatusArea` extension point requires.
+        const button = new PanelMenu.Button(0.5);
+        // The icon box becomes the button's content so the panel shows
+        // "<headset icon><mic icon>".
+        //
+        // GNOME Shell 50.4 (verified via a live probe on this build): the
+        // button exposes neither a working `child` property nor a `container`
+        // wired into its actor tree - both would leave the button with zero
+        // children and the panel allocates it 0x0 (the "black dot" bug). The
+        // content must be added as a direct child of the button actor.
+        button.add_child(this._iconBox);
         this._statusButton = button;
 
-        // Build the popup menu eagerly. The menu's actor is a BoxPointer that
-        // anchors to the button; per the shell's own PanelMenuButton the menu
-        // actor must be added to Main.uiGroup (the shell's UI overlay group)
-        // and hidden until opened. The ClickGesture above toggles it.
+        // Build the popup menu eagerly and hand it to the button: setMenu()
+        // adds it to Main.uiGroup, hides it until opened, and makes a click
+        // on the button toggle it (the shell's own PanelMenuButton behavior,
+        // verified against this shell build's panelMenu.js).
         this._menu = new PopupMenu.PopupMenu(this._statusButton,
             St.Side.LEFT, St.Side.TOP);
-        this._menu.actor.add_style_class_name('panel-menu');
-        Main.uiGroup.add_child(this._menu.actor);
-        this._menu.actor.hide();
+        button.setMenu(this._menu);
         this._buildMenu();
 
-        // Insert into the top panel, on the RIGHT side, so it orders next to
-        // the other status indicators.
-        const container = this._panelStatusContainer();
-        if (container) {
-            container.add_child(this._statusButton);
-        } else {
-            console.warn('hs80max: could not find a panel container '
-                + '(Main.panel); status icon disabled.');
-            return;
-        }
+        // Register through the shell's official extension point, exactly like
+        // the Ubuntu appindicator extension does. This inserts the button
+        // into the panel's LEFT box, so it orders next to the shell's own
+        // status icons (left of the centre clock) instead of the
+        // right-hand status area.
+        Main.panel.addToStatusArea('hs80max', this._statusButton, 1, 'left');
 
-        this._updateLabel();
         this._refreshUi();
     }
 
@@ -335,6 +279,7 @@ export default class Hs80MaxExtension extends Extension {
 
         // --- Control section: open the system volume mixer ---
         menu.addAction('Lautstärke (PulseAudio)', () => this._openVolumeApp());
+        menu.addAction('Service neu starten', () => this._restartService());
 
         // Reflect the current state on first build.
         this._updateMenuStatus();
@@ -401,12 +346,17 @@ export default class Hs80MaxExtension extends Extension {
     }
 
     _destroyStatusIcon() {
-        // Close and destroy the popup menu before tearing the button down.
-        // Destroying the PopupMenu tears down its items and its BoxPointer
-        // actor (a child of Main.uiGroup).
+        // The button owns the menu (setMenu() at creation): its _onDestroy
+        // destroys it. So only close it here, then hand it back via
+        // setMenu(null) - destroying the menu ourselves first would make the
+        // button's _onDestroy crash on the already-disposed BoxPointer
+        // (observed on this shell build).
         if (this._menu) {
             try { this._menu.close(); } catch (e) { /* cosmetic */ }
-            try { this._menu.destroy(); } catch (e) { /* cosmetic */ }
+        }
+        if (this._statusButton) {
+            try { this._statusButton.setMenu(null); }
+            catch (e) { /* cosmetic */ }
         }
         this._menu = null;
         this._menuStatus = null;
@@ -414,18 +364,22 @@ export default class Hs80MaxExtension extends Extension {
         this._menuBattery = null;
         this._menuMic = null;
         this._menuUpdated = null;
-        this._uiActor = null;
 
         if (this._statusButton) {
-            if (this._statusButton.parent)
-                this._statusButton.parent.remove_child(this._statusButton);
+            // addToStatusArea() registered us; clear the entry so the panel
+            // does not keep a dangling reference (same as appindicator does).
+            if (Main.panel && Main.panel.statusArea)
+                Main.panel.statusArea['hs80max'] = null;
+            try {
+                if (this._statusButton.parent)
+                    this._statusButton.parent.remove_child(this._statusButton);
+            } catch (e) { /* cosmetic */ }
             this._statusButton.destroy();
             this._statusButton = null;
         }
         this._iconBox = null;
         this._connectionIcon = null;
         this._micIcon = null;
-        this._clickGesture = null;
     }
 
 
@@ -519,7 +473,7 @@ export default class Hs80MaxExtension extends Extension {
         if (this._signalConnected)
             return;
         try {
-            const file = Gio.File.new_for_path(STATUS_FILE, null);
+            const file = Gio.File.new_for_path(STATUS_FILE);
             this._fileMonitor = file.monitor(Gio.FileMonitorFlags.NONE, null);
             this._fileMonitor.connect('changed',
                 (f, other, ev) => this._onStatusFileChanged());
@@ -620,28 +574,27 @@ export default class Hs80MaxExtension extends Extension {
         }
     }
 
-    _updateLabel() {
-        if (!this._statusButton)
-            return;
-
-        const text = (this._battery >= 0) ? String(this._battery) : '';
-        // The button label is what the top bar renders next to the icons.
-        try {
-            if (this._statusButton.label)
-                this._statusButton.label.set_text(text);
-        } catch (e) { /* label update is cosmetic */ }
-    }
-
     _refreshUi() {
         this._updateIcons();
         this._updateMenuStatus();
-        this._updateLabel();
     }
 
     // Open the system volume mixer (pavucontrol). Spawned detached so the
     // shell keeps running while the app is in the foreground.
     _openVolumeApp() {
         _spawnDetached([VOLUME_APP]);
+    }
+
+    // Restart the daemon (systemctl handles stop+start). The existing
+    // status polling and D-Bus signal match pick the new instance up
+    // automatically once it owns the bus name again.
+    _restartService() {
+        try {
+            _spawnSync([SYSTEMCTL, '--user', 'restart', SERVICE_UNIT]);
+            console.log('hs80max: restarted ' + SERVICE_UNIT);
+        } catch (e) {
+            console.warn('hs80max: could not restart daemon: ' + e.message);
+        }
     }
 
     // Make sure the daemon is running. It is a long-lived systemd user
