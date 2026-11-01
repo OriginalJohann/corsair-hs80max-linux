@@ -127,7 +127,7 @@ in
     # option (default /home/<user>), so non-standard homes work too. The
     # shell picks the new files up on the next restart (Alt+F2 → r).
     system.activationScripts.hs80max-extension.text = ''
-      extDir=$(dirname $(readlink -f ${config.users.users.${cfg.user}.home or "/home/${cfg.user}"}))/gnome-shell/extensions/hs80max@fne.dev
+      extDir=$(dirname $(readlink -f ${config.users.users.${cfg.user}.home or "/home/${cfg.user}"}))/gnome-shell/extensions/hs80max@originaljohann.dev
       mkdir -p "$extDir"
       cp -r ${extensionDir}/. "$extDir"/
     '';

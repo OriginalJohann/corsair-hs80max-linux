@@ -1,0 +1,23 @@
+/* Corsair HS80 Max - GNOME Shell extension styles */
+
+/* The two status icons (connection + mic) shown side by side in the panel. */
+.hs80max-icon-box {
+    padding: 0 2px;
+}
+
+/* Individual panel status icon (connection / microphone). */
+.hs80max-icon {
+    -StIcon-icon-size: 16px;
+    margin: 0 1px;
+}
+
+/* Menu rows that act as buttons (volume app / service restart). The theme
+   gives no hover cue for plain .popup-menu-item, so the rows get their own
+   hover highlight to read as clickable. */
+.hs80max-action-item {
+    border-radius: 6px;
+}
+
+.hs80max-action-item:hover {
+    background-color: rgba(255, 255, 255, 0.14);
+}

@@ -123,6 +123,8 @@ export default class Hs80MaxExtension extends Extension {
         this._menuBattery = null;
         this._menuMic = null;
         this._menuUpdated = null;
+        this._menuVolume = null;
+        this._menuRestart = null;
         this._fileMonitor = null;
         this._pollId = 0;
         this._retries = 0;
@@ -277,12 +279,34 @@ export default class Hs80MaxExtension extends Extension {
 
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // --- Control section: open the system volume mixer ---
-        menu.addAction('Lautstärke (PulseAudio)', () => this._openVolumeApp());
-        menu.addAction('Service neu starten', () => this._restartService());
+        // --- Control section: open the system volume mixer / restart the
+        //     daemon. `addAction()` alone gives no hover cue and keeps the
+        //     menu open, so both rows go through _addActionButton(). ---
+        this._menuVolume = this._addActionButton(
+            menu, 'Lautstärke (PulseAudio)', () => this._openVolumeApp());
+        this._menuRestart = this._addActionButton(
+            menu, 'Service neu starten', () => this._restartService());
 
         // Reflect the current state on first build.
         this._updateMenuStatus();
+    }
+
+    // Create one menu row that behaves like a button: the shared
+    // `hs80max-action-item` style class gives it a hover highlight (see
+    // stylesheet.css), and the 'activate' connection closes the popup menu,
+    // which `PopupMenu.addAction()` does not do on its own.
+    _addActionButton(menu, label, callback) {
+        // Shell 50 API (verified against js/ui/popupMenu.js 50.4): the label
+        // text is the first positional arg of PopupMenuItem; `label` is not
+        // a valid constructor param.
+        const item = new PopupMenu.PopupMenuItem(label);
+        item.actor.add_style_class_name('hs80max-action-item');
+        item.connect('activate', (o, event) => {
+            callback(event);
+            menu.close();
+        });
+        menu.addMenuItem(item);
+        return item;
     }
 
 

@@ -6,7 +6,7 @@ einbindest. Ein einziger Import und eine einzige Option installieren danach beid
 | Komponente | Was sie macht |
 |---|---|
 | **Service** (`hs80max.service`, systemd-User-Unit) | Python-Daemon: liest per HID-Protokoll Akku-Stand, Verbindungsmodus (Dongle vs. USB-C) und Mikrofon-Status des HS80 Max und stellt sie über die D-Bus-Session (`com.corsair.hs80max`) bereit. |
-| **GNOME-Extension** (`hs80max@fne.dev`) | Zeigt in der GNOME-Top-Bar zwei Icons (Verbindung, Mikrofon) plus Akkuprozent; Klick öffnet Details und `pavucontrol`. |
+| **GNOME-Extension** (`hs80max@originaljohann.dev`) | Zeigt in der GNOME-Top-Bar zwei Icons (Verbindung, Mikrofon) plus Akkuprozent; Klick öffnet Details und `pavucontrol`. |
 
 Das Modul legt an:
 
@@ -18,7 +18,7 @@ Das Modul legt an:
    `WantedBy=default.target`, `Restart=on-failure`) und **restartet ihn automatisch bei jedem
    `nixos-rebuild switch`** (NixOS restartet User-Services sonst nicht).
 4. **GNOME-Extension** – kopiert die Extension-Dateien in
-   `~/.local/share/gnome-shell/extensions/hs80max@fne.dev/` des konfigurierten Users.
+   `~/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev/` des konfigurierten Users.
 
 ---
 
@@ -87,7 +87,7 @@ nixos-rebuild switch
 Das war's. Der Aktivierungslauf:
 
 - installiert/updated die udev-Regel, die D-Bus-Policy und die User-Unit,
-- kopiert die Extension in `~/.local/share/gnome-shell/extensions/hs80max@fne.dev/`,
+- kopiert die Extension in `~/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev/`,
 - **restartet** den laufenden `hs80max`-User-Service automatisch
   (stop + start, nur wenn eine User-Session läuft).
 
@@ -98,7 +98,7 @@ deiner `dconf`-Einstellung überlassen und übersteht Rebuilds. Einmalig:
 
 - **GNOME-Einstellungen → Erweiterte → Erweiterungen → „Corsair HS80 Max Status“**
   anmachen, **oder**
-- `gsettings set org.gnome.shell enabled-extensions "['hs80max@fne.dev']"`
+- `gsettings set org.gnome.shell enabled-extensions "['hs80max@originaljohann.dev']"`
   (Achtung: das ersetzt die komplette Liste – vorher mit
   `gsettings get org.gnome.shell enabled-extensions` den alten Wert merken).
 
@@ -123,7 +123,7 @@ dbus-send --session --print-reply --dest=com.corsair.hs80max \
   /com/corsair/hs80max com.corsair.hs80max.GetStatus
 
 # Extension ist kopiert?
-ls ~/.local/share/gnome-shell/extensions/hs80max@fne.dev/
+ls ~/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev/
 ```
 
 ## 7. Update des Projekts
@@ -142,7 +142,7 @@ Danach ggf. Shell neu laden (Alt+F2 → `r`), wenn sich die Extension geändert 
 |---|---|
 | Service startet, meldet permanent `disconnected` | Dongle nicht erkannt? `ls /sys/class/hidraw/hidraw*/device` prüfen; udev-Regel greift erst nach neuem Anstecken des Dongles oder `sudo udevadm control --reload-rules && sudo udevadm trigger`. |
 | `systemctl --user status hs80max` zeigt alten Store-Pfad | Normal nur kurz nach `switch` vor Abschluss des Aktivierungsskripts; danach muss der Pfad aktuell sein. |
-| Extension erscheint nicht in GNOME-Einstellungen | Ordner `~/.local/share/gnome-shell/extensions/hs80max@fne.dev/` vorhanden? `metadata.json` muss `shell-version: ["50"]` mit deinem GNOME abdecken. |
+| Extension erscheint nicht in GNOME-Einstellungen | Ordner `~/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev/` vorhanden? `metadata.json` muss `shell-version: ["50"]` mit deinem GNOME abdecken. |
 | Extension zeigt „getrennt“, Service läuft aber | Die Extension läuft als **User** – sie sieht nur die Session-D-Bus desselben Users. `status.json` (Punkt 6) zeigt, ob der Daemon überhaupt Status liefert. |
 | `cp: cannot create … $extDir` im Aktivierungslog | `users.users.<user>` nicht definiert → `services.hs80max.user` setzen und den User in `users.users` anlegen. |
 

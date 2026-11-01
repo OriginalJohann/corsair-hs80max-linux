@@ -37,7 +37,7 @@ corsair-hs80max-linux/
 │   │                          # (PanelMenu.Button via Main.panel.addToStatusArea,
 │   │                          #  left box, like the appindicator extension)
 │   ├── main.js                # Re-export shim (upstream builds load main.js)
-│   ├── style.css
+│   ├── stylesheet.css
 │   └── icons/
 │       ├── headset-disconnected-symbolic.svg
 │       ├── headset-connected-symbolic.svg
@@ -52,4 +52,4 @@ corsair-hs80max-linux/
 - Battery: proprietary HID protocol (see `resources/battery-protocol.md`), no USB Battery SUD
 - D-Bus service name: `com.corsair.hs80max` (session bus)
 - Volume app: `pavucontrol`
-- Extension UUID: `hs80max@fne.dev`
+- Extension UUID: `hs80max@originaljohann.dev`
