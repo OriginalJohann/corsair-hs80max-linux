@@ -12,11 +12,10 @@
 //   * `GetStatus() -> a{sv}` carrying {Mode, Battery, MicMuted, UpdatedAt}
 //   * signal `StatusChanged(mode: s, battery: i, mic_muted: b)`
 //
-// Refresh strategy (matches the spec: "update whenever the service updates
-// them or after 30 minutes"):
+// Refresh strategy:
 //   1. one initial `GetStatus` read on enable,
-//   2. a D-Bus match on `StatusChanged` for instant updates,
-//   3. a 30-minute safety-fallback poll in case a signal is missed.
+//   2. a GFile monitor on the daemon's status file for instant updates,
+//   3. a 1-minute safety-fallback poll in case a file event is missed.
 // A D-Bus error on a read is treated as "daemon unreachable" -> the
 // extension falls back to the "disconnected" presentation.
 //
@@ -62,16 +61,15 @@ const ICON_MIC_UNMUTED = 'mic-unmute-symbolic';
 // Volume mixer launched from the menu (system-standard app).
 const VOLUME_APP = 'pavucontrol';
 
-// Refresh cadence. The daemon emits StatusChanged, but this GJS build does
-// not reliably deliver that signal to the extension (see the header note on
-// the broken GDBus wrapper), so the extension re-reads status on this
-// interval. Kept at 1 min so the icon self-heals quickly without the signal.
+// Refresh cadence. The extension re-reads status on this interval as a
+// safety net in case a status-file monitor event is missed. Kept at 1 min
+// so the icon self-heals quickly.
 const REFRESH_INTERVAL_S = 60;
 // Per-call timeout (ms) so a wedged daemon cannot stall a read.
 const CALL_TIMEOUT_MS = 4000;
 // Startup race: enable() may run before the daemon owns the bus name, so the
 // first read can fail. Retry a few times (every RETRY_INTERVAL_S) so the UI
-// self-heals within seconds instead of waiting for the 30-min poll.
+// self-heals within seconds instead of waiting for the 1-min poll.
 const RETRY_INTERVAL_S = 2;
 const RETRY_MAX = 5;
 // Size (px) of the two status icons shown side by side in the panel.
@@ -146,9 +144,10 @@ export default class Hs80MaxExtension extends Extension {
         try {
             // Make sure the daemon is running first (one-shot start if not).
             this._ensureDaemon();
-            // Read once now, then react to StatusChanged and a 30-min fallback.
+            // Read once now, then react to status-file changes and a 1-min
+            // fallback.
             this._readStatus();
-            this._startSignalMatch();
+            this._startFileMonitor();
             this._startPolling();
         } catch (e) {
             console.warn('hs80max: enable failed: ' + e.message);
@@ -156,7 +155,7 @@ export default class Hs80MaxExtension extends Extension {
     }
 
     disable() {
-        this._stopSignalMatch();
+        this._stopFileMonitor();
         this._stopPolling();
         if (this._retryId > 0) {
             GLib.source_remove(this._retryId);
@@ -493,30 +492,30 @@ export default class Hs80MaxExtension extends Extension {
     // add_match_rule / the connection "message" signal are not exposed),
     // so a GFile monitor is the reliable wake-up: the daemon rewrites
     // status.json on every change, we re-read status on each monitor fire.
-    _startSignalMatch() {
-        if (this._signalConnected)
+    _startFileMonitor() {
+        if (this._fileMonitorConnected)
             return;
         try {
             const file = Gio.File.new_for_path(STATUS_FILE);
             this._fileMonitor = file.monitor(Gio.FileMonitorFlags.NONE, null);
             this._fileMonitor.connect('changed',
                 (f, other, ev) => this._onStatusFileChanged());
-            this._signalConnected = true;
+            this._fileMonitorConnected = true;
         } catch (e) {
             console.warn('hs80max: watching status file failed: '
                 + e.message);
-            this._signalConnected = false;
+            this._fileMonitorConnected = false;
         }
     }
 
-    _stopSignalMatch() {
+    _stopFileMonitor() {
         if (this._fileMonitor) {
             try {
                 this._fileMonitor.cancel_monitor();
             } catch (e) { /* cosmetic */ }
         }
         this._fileMonitor = null;
-        this._signalConnected = false;
+        this._fileMonitorConnected = false;
     }
 
     // A monitor event means the daemon's status file changed: re-read the
@@ -525,9 +524,8 @@ export default class Hs80MaxExtension extends Extension {
         this._readStatus();
     }
 
-    // Start the 30-minute safety-fallback poll (spec: "or after 30 minutes").
-    // The callback returns true so the source keeps firing until
-    // _stopPolling() removes it.
+    // Start the 1-minute safety-fallback poll. The callback returns true so
+    // the source keeps firing until _stopPolling() removes it.
     _startPolling() {
         if (this._pollId > 0)
             return;
@@ -610,7 +608,7 @@ export default class Hs80MaxExtension extends Extension {
     }
 
     // Restart the daemon (systemctl handles stop+start). The existing
-    // status polling and D-Bus signal match pick the new instance up
+    // status polling and file monitor pick the new instance up
     // automatically once it owns the bus name again.
     _restartService() {
         try {
@@ -623,7 +621,7 @@ export default class Hs80MaxExtension extends Extension {
 
     // Make sure the daemon is running. It is a long-lived systemd user
     // service; if it is not active we start it as a one-shot (Start) and let
-    // the initial read + signal match pick it up once it owns the bus name.
+    // the initial read + file monitor pick it up once it owns the bus name.
     _ensureDaemon() {
         let active = false;
         try {

@@ -8,7 +8,7 @@
     * Display quick status info in the GNOME systray (connected or disconnected, mic on or off, two small icons next to each other dynamically positioned to the left of the systray).
     * Show detailed status information upon clicking the tray icon (battery percentage).
     * Open a volume regulation app via interaction with the connection icon (system standard if possible).
-    * Update the in the extension whenever the service updates them or after 30 minutes.
+    * Update the in the extension whenever the service updates them or after 1 minute.
 
 ## 2. Communication & Documentation Standards
 * **User Communication:** Primary language for chat interface communication is **German**.

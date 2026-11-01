@@ -18,7 +18,7 @@ status is read from the dongle over a proprietary HID protocol on
   left of the systray, plus battery percentage; clicking opens a detail popup
 - **Volume mixer** – the connection icon opens `pavucontrol`
 - **Live updates** – the extension refreshes whenever the service publishes a
-  status change (via a watched status file), with a 30-minute fallback poll
+  status change (via a watched status file), with a 1-minute fallback poll
 
 ## Architecture
 

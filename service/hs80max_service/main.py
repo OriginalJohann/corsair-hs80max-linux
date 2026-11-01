@@ -23,7 +23,7 @@ from pydbus import SessionBus
 
 from . import connection
 from .dbus_api import BUS_NAME, HS80Service, INTROSPECTION_XML, OBJECT_PATH, Status
-from .hid_protocol import HIDError, HS80HID
+from .hid_protocol import HIDError, HIDNotFound, HS80HID
 
 log = logging.getLogger("hs80max.main")
 
@@ -141,6 +141,13 @@ class Poller:
         answered or a fresh battery reading came back, "off" otherwise.
         Battery and mic keep their last known values when a single query
         fails.
+
+        A :class:`~hs80max_service.hid_protocol.HIDNotFound` (device node not
+        created yet after a dongle replug) is treated differently: the last
+        known power state is kept, because the node will appear within a
+        fraction of a second and the headset is very likely still on.  Any
+        other :class:`~hs80max_service.hid_protocol.HIDError` is a real
+        unreachable channel and sets ``headset_on`` to False for this cycle.
         """
         try:
             hid = HS80HID()
@@ -149,6 +156,11 @@ class Poller:
                 headset_on, battery, mic = hid.status()
             finally:
                 hid.close()
+        except HIDNotFound as exc:
+            # Device node not present yet (dongle replug in progress): keep
+            # the last known power state so the mode does not flip to "off".
+            log.warning("HID device node not found yet: %s", exc)
+            return
         except HIDError as exc:
             log.warning("HID query failed: %s", exc)
             # The dongle is present but the control channel could not be

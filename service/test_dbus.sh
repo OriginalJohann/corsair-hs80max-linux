@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # E2E test: HS80 D-Bus service against a private test bus.
 set -u
-cd /Data/ai/corsair-hs80max-linux
+# Run from the repo root (the script lives in service/).
+cd "$(dirname "$(readlink -f "$0")")/.."
 
 cat > /tmp/dbus-test.conf <<'CONF'
 <busconfig>

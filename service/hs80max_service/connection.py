@@ -1,12 +1,16 @@
 """Connection detection for the HS80 Max.
 
-Two observable states, both derived from the dongle (1b1c:0a97):
+The daemon's overall connection ``Mode`` has three values:
 
 * ``connected``    – the wireless dongle is plugged in (headset reachable).
+* ``off``          – the dongle is present but its control channel could not
+  be opened (headset powered off); layered on by the :class:`Poller`.
 * ``disconnected`` – the dongle is not present.
 
-Battery and mic state are provided separately by :mod:`hid_protocol` and are
-*always* sourced from the dongle.
+This module derives ``connected`` vs. ``disconnected`` from the dongle
+(1b1c:0a97); the ``off`` state is added by the poller. Battery and mic state
+are provided separately by :mod:`hid_protocol` and are *always* sourced from
+the dongle.
 """
 
 from __future__ import annotations

@@ -86,6 +86,18 @@ class HIDError(Exception):
     """Raised when the HID device cannot be opened or communicated with."""
 
 
+class HIDNotFound(HIDError):
+    """Raised when the control-channel device node does not exist yet.
+
+    Distinct from a generic :class:`HIDError`: after a dongle replug the
+    USB device is enumerated but the ``/dev/hidrawN`` node may not have been
+    created yet by udev.  The Poller must treat this case differently from a
+    real open failure – it must *not* conclude the headset is off, because
+    the device node will appear within a fraction of a second and the last
+    known battery / mic values are still valid.
+    """
+
+
 def find_control_hidraw() -> str | None:
     """Locate the /dev/hidrawN node of the HS80 MAX control interface.
 
@@ -130,11 +142,16 @@ class HS80HID:
 
     # ------------------------------------------------------------------ open
     def open(self) -> None:
-        """Open the hidraw device node (read/write)."""
+        """Open the hidraw device node (read/write).
+
+        Raises :class:`HIDNotFound` when the device node does not exist yet
+        (e.g. right after a dongle replug, before udev has created it) and a
+        generic :class:`HIDError` for any other open failure.
+        """
         if self._fd is not None:
             return
         if self.device_path is None:
-            raise HIDError("HS80 MAX dongle (1b1c:0a97) not found")
+            raise HIDNotFound("HS80 MAX dongle (1b1c:0a97) not found")
         try:
             self._fd = os.open(self.device_path, os.O_RDWR | os.O_NONBLOCK)
         except PermissionError as exc:
@@ -252,16 +269,6 @@ class HS80HID:
             if attempt < WAKE_ATTEMPTS:
                 time.sleep(WAKE_RETRY_PAUSE)
         return False
-
-    def battery_percent(self) -> int | None:
-        """Query the headset battery level (wakes the channel first).
-
-        Returns an integer percentage (0–100), or ``None`` when the headset
-        is not connected or the reading is implausible.
-        """
-        if not self.wake():
-            return None
-        return self._battery_query()
 
     def _battery_query(self) -> int | None:
         """Battery query; assumes the channel is already woken up.

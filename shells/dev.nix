@@ -5,7 +5,6 @@ pkgs.mkShell {
 
   buildInputs = with pkgs; [
     python3
-    python3Packages.pyusb
     python3Packages.pydbus
     dbus
     wireplumber
