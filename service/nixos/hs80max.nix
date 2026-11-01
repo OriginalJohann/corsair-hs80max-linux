@@ -57,6 +57,11 @@ in
   config = lib.mkIf cfg.enable {
     # ------------------------------------------------------------------ udev
     # Grant the 'users' group access to the HS80 MAX receiver HID interface.
+    # (Membership of the service user in 'users' is the admin's responsibility:
+    # NixOS desktop users are typically in 'users' already; home-manager users
+    # can set it via `home.packages`/`programs` – this module must not
+    # reference `users.users.<name>` because the user may only exist via
+    # home-manager, where the option does not exist.)
     services.udev.extraRules = ''
       SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="0a97", MODE="0660", GROUP="users"
     '';
@@ -91,11 +96,13 @@ in
 
     # ------------------------------------------------------- D-Bus session
     # Install the session-bus policy file so the user can own the bus name.
-    # NixOS has no first-class option for session bus policies,
-    # so we use an activation script.
+    # NixOS has no first-class option for session bus policies, and the
+    # session bus only reads policies from /etc/dbus-1/session.conf.d and
+    # /run/dbus/session.conf.d, so the activation script copies it to the
+    # latter (read by the daemon at session-bus start).
     system.activationScripts.hs80max-dbus.text = ''
-      mkdir -p $out/lib/dbus-1/session.conf.d
-      cp ${dbusConf} $out/lib/dbus-1/session.conf.d/
+      mkdir -p /run/dbus/session.conf.d
+      cp ${dbusConf} /run/dbus/session.conf.d/
     '';
 
     # -------------------------------------------------- systemd user unit
@@ -123,11 +130,12 @@ in
     # `gnome.gnome-shell.extensions` list cannot be used. It is installed the
     # same way as the D-Bus policy above: an activation script copies it into
     # the user's extensions directory, where GNOME finds it by the UUID in
-    # metadata.json. The destination is resolved from the user's `home`
-    # option (default /home/<user>), so non-standard homes work too. The
-    # shell picks the new files up on the next restart (Alt+F2 → r).
+    # metadata.json. The destination is the standard /home/<user> (the user
+    # may only exist via home-manager, so `users.users.<user>.home` must not
+    # be referenced). The shell picks the new files up on the next restart
+    # (Alt+F2 → r).
     system.activationScripts.hs80max-extension.text = ''
-      extDir=$(dirname $(readlink -f ${config.users.users.${cfg.user}.home or "/home/${cfg.user}"}))/gnome-shell/extensions/hs80max@originaljohann.dev
+      extDir=/home/${cfg.user}/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev
       mkdir -p "$extDir"
       cp -r ${extensionDir}/. "$extDir"/
     '';

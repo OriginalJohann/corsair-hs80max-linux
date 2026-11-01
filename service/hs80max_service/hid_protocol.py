@@ -119,15 +119,15 @@ def find_control_hidraw() -> str | None:
         if len(parts) != 3:
             continue
         try:
-            vid, pid, iface = int(parts[1], 16), int(parts[2].split(".")[0], 16), None
-        except ValueError:
+            vid, pid = int(parts[1], 16), int(parts[2].split(".")[0], 16)
+            m = re.search(r":1\.(\d+)$", os.path.basename(os.path.dirname(os.path.realpath(dev_link))))
+            iface = int(m.group(1)) if m else -1
+        except (ValueError, IndexError, OSError):
+            # Malformed entry (e.g. bluetooth/i2c hidraw) – skip, never abort
+            # the whole scan.
             continue
         if vid != VENDOR_ID or pid != PRODUCT_ID:
             continue
-        # The USB interface number is embedded in the device path
-        # (e.g. .../1-2.1:1.4/0003:1B1C:0A97.0002 → interface 4).
-        m = re.search(r":1\.(\d+)$", os.path.basename(os.path.dirname(os.path.realpath(dev_link))))
-        iface = int(m.group(1)) if m else -1
         if iface == CONTROL_INTERFACE:
             return os.path.join("/dev", entry)
     return None

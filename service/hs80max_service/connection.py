@@ -47,13 +47,3 @@ def dongle_present() -> bool:
 def connection_mode() -> str:
     """Return ``connected`` when the dongle is present, else ``disconnected``."""
     return "connected" if dongle_present() else "disconnected"
-
-
-def selftest() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
-    log.info("dongle present: %s", dongle_present())
-    log.info("connection mode: %s", connection_mode())
-
-
-if __name__ == "__main__":
-    selftest()

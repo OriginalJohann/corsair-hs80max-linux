@@ -143,6 +143,42 @@ def test_battery_query_returns_none_for_out_of_range_value(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# _mic_query (fake _read)
+# ---------------------------------------------------------------------------
+
+def _mic_flag_report(flag: int) -> bytes:
+    """Build a 64-byte mic IN report carrying ``flag`` at byte [4]."""
+    report = bytearray(64)
+    report[4] = flag
+    return bytes(report)
+
+
+def test_mic_query_returns_true_for_muted_report(monkeypatch) -> None:
+    hid = HS80HID(device_path="/dev/none")
+    _stub_hid(monkeypatch, [_mic_flag_report(0x01)])
+    assert hid._mic_query() is True
+
+
+def test_mic_query_returns_false_for_unmuted_report(monkeypatch) -> None:
+    hid = HS80HID(device_path="/dev/none")
+    _stub_hid(monkeypatch, [_mic_flag_report(0x00)])
+    assert hid._mic_query() is False
+
+
+def test_mic_query_returns_none_for_periodic_report(monkeypatch) -> None:
+    # A periodic receiver report is not a mic answer.
+    hid = HS80HID(device_path="/dev/none")
+    _stub_hid(monkeypatch, [_PERIODIC])
+    assert hid._mic_query() is None
+
+
+def test_mic_query_returns_none_when_no_report(monkeypatch) -> None:
+    hid = HS80HID(device_path="/dev/none")
+    _stub_hid(monkeypatch, [])
+    assert hid._mic_query() is None
+
+
+# ---------------------------------------------------------------------------
 # HIDNotFound distinction
 # ---------------------------------------------------------------------------
 
@@ -157,6 +193,66 @@ def test_open_raises_hid_not_found_when_device_node_missing(monkeypatch) -> None
         pass
     # HIDNotFound is a kind of HIDError (catchable by existing handlers).
     assert issubclass(HIDNotFound, HIDError)
+
+
+# ---------------------------------------------------------------------------
+# find_control_hidraw robustness
+# ---------------------------------------------------------------------------
+
+def test_find_control_hidraw_skips_malformed_entries(monkeypatch, tmp_path) -> None:
+    """A malformed hidraw entry must not abort the whole scan.
+
+    Bluetooth/i2c hidraw entries have a ``device`` symlink target that is not
+    in the ``0003:VVVV:PPPP.XXXX`` form, and a broken/symlink-loop target
+    makes ``os.path.realpath`` raise ``OSError``. Neither may escape the scan
+    loop: a valid control entry later in sort order must still be found.
+    """
+    import os
+
+    from hs80max_service.hid_protocol import find_control_hidraw
+
+    # Real (resolvable) target dir for the valid entry's device symlink,
+    # including the USB interface path segment (interface 4 = control).
+    real_dev = tmp_path / "1-2.1:1.4" / "0003:1B1C:0A97.0002"
+    real_dev.mkdir(parents=True)
+
+    # Fake hidraw entries:
+    #  hidraw0: matching VID/PID (interface 1) whose device link is
+    #            unresolvable (symlink loop) -> realpath raises OSError.
+    #  hidraw1: malformed target (fewer than 3 ':'-separated parts, e.g.
+    #            bluetooth/i2c hidraw entries).
+    #  hidraw2: the real control entry (interface 4).
+    readlink_targets = {
+        "/sys/class/hidraw/hidraw0/device": "../../../0003:1B1C:0A97.0001",
+        "/sys/class/hidraw/hidraw1/device": "0005:0000:0000.0000",
+        "/sys/class/hidraw/hidraw2/device": "../../../0003:1B1C:0A97.0002",
+    }
+
+    real_listdir = os.listdir
+    real_readlink = os.readlink
+    real_realpath = os.path.realpath
+    monkeypatch.setattr(os, "listdir", lambda path: (
+        ["hidraw0", "hidraw1", "hidraw2"] if path == "/sys/class/hidraw"
+        else real_listdir(path)
+    ))
+    monkeypatch.setattr(os, "readlink", lambda p: (
+        readlink_targets[str(p)] if str(p) in readlink_targets
+        else real_readlink(p)
+    ))
+
+    def fake_realpath(p):
+        p = str(p)
+        # Deterministic OSError inside the scan loop (symlink-loop device
+        # target) – must be caught and skipped, never escape the scan.
+        if p == "/sys/class/hidraw/hidraw0/device":
+            raise OSError("symlink loop")
+        if p.endswith("hidraw2/device"):
+            return str(real_dev)
+        return real_realpath(p)
+
+    monkeypatch.setattr(os.path, "realpath", fake_realpath)
+
+    assert find_control_hidraw() == "/dev/hidraw2"
 
 
 # ---------------------------------------------------------------------------

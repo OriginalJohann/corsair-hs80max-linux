@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -73,23 +74,30 @@ class HS80Service:
     def __init__(self, bus) -> None:
         self._bus = bus
         self._status = Status()
+        # Guards _status: publish() runs on the Poller thread while D-Bus
+        # method/property handlers run on the GLib main-loop thread.
+        self._lock = threading.Lock()
 
     # ---------------------------------------------------------- properties
     @property
     def Mode(self) -> str:
-        return self._status.mode
+        with self._lock:
+            return self._status.mode
 
     @property
     def Battery(self) -> int:
-        return self._status.battery
+        with self._lock:
+            return self._status.battery
 
     @property
     def MicMuted(self) -> bool:
-        return self._status.mic_muted
+        with self._lock:
+            return self._status.mic_muted
 
     @property
     def UpdatedAt(self) -> int:
-        return int(self._status.updated_at * 1000)
+        with self._lock:
+            return int(self._status.updated_at * 1000)
 
     # -------------------------------------------------------------- signals
     # pydbus emits the D-Bus signal when this attribute is called
@@ -103,18 +111,22 @@ class HS80Service:
         ``a{sv}`` returns, so we wrap each value explicitly with the
         correct D-Bus type signature.
         """
-        return {
-            "Mode": GLib.Variant("s", self._status.mode),
-            "Battery": GLib.Variant("i", self._status.battery),
-            "MicMuted": GLib.Variant("b", self._status.mic_muted),
-            "UpdatedAt": GLib.Variant("t", int(self._status.updated_at * 1000)),
-        }
+        with self._lock:
+            status = self._status
+            return {
+                "Mode": GLib.Variant("s", status.mode),
+                "Battery": GLib.Variant("i", status.battery),
+                "MicMuted": GLib.Variant("b", status.mic_muted),
+                "UpdatedAt": GLib.Variant("t", int(status.updated_at * 1000)),
+            }
 
     def GetBattery(self) -> int:
-        return self._status.battery
+        with self._lock:
+            return self._status.battery
 
     def GetMicMuted(self) -> bool:
-        return self._status.mic_muted
+        with self._lock:
+            return self._status.mic_muted
 
     # ------------------------------------------------------ status file
     # This GJS build cannot deliver D-Bus signals to the extension (the
@@ -132,12 +144,13 @@ class HS80Service:
         path = self._status_file_path
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            payload = {
-                "mode": self._status.mode,
-                "battery": self._status.battery,
-                "mic_muted": self._status.mic_muted,
-                "updated_at": int(self._status.updated_at * 1000),
-            }
+            with self._lock:
+                payload = {
+                    "mode": self._status.mode,
+                    "battery": self._status.battery,
+                    "mic_muted": self._status.mic_muted,
+                    "updated_at": int(self._status.updated_at * 1000),
+                }
             tmp = f"{path}.tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh)
@@ -151,35 +164,39 @@ class HS80Service:
 
         Returns True when the status changed.
         """
-        changed = (
-            status.mode != self._status.mode
-            or status.battery != self._status.battery
-            or status.mic_muted != self._status.mic_muted
-        )
-        if changed:
-            log.info(
-                "status changed: mode=%s battery=%s mic_muted=%s",
-                status.mode, status.battery, status.mic_muted,
+        changed = False
+        with self._lock:
+            changed = (
+                status.mode != self._status.mode
+                or status.battery != self._status.battery
+                or status.mic_muted != self._status.mic_muted
             )
-            self._status = status
+            if changed:
+                log.info(
+                    "status changed: mode=%s battery=%s mic_muted=%s",
+                    status.mode, status.battery, status.mic_muted,
+                )
+                self._status = status
+            else:
+                # Keep the timestamp fresh even without value changes.
+                self._status = Status(
+                    mode=self._status.mode,
+                    battery=self._status.battery,
+                    mic_muted=self._status.mic_muted,
+                    updated_at=status.updated_at,
+                )
+        if changed:
             # Emit the D-Bus signal directly from the Poller thread.
             # pydbus's DbusSignal.__call__ -> g_dbus_connection_send_message
             # is thread-safe per the GLib docs, so no dispatch to the main
             # loop is needed.  (GLib.idle_add from a non-main thread is
             # undefined behaviour and silently drops the source – the
             # original bug that caused the extension icon to go stale.)
+            # Done outside the lock so no D-Bus I/O happens under it.
             self.StatusChanged(
                 status.mode, status.battery, status.mic_muted,
             )
             # Also update the status file so the extension's GFile monitor
             # fires (D-Bus signals are not delivered by this GJS build).
             self._write_status_file()
-        else:
-            # Keep the timestamp fresh even without value changes.
-            self._status = Status(
-                mode=self._status.mode,
-                battery=self._status.battery,
-                mic_muted=self._status.mic_muted,
-                updated_at=status.updated_at,
-            )
         return changed

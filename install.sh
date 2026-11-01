@@ -33,6 +33,12 @@ RULE_FILE="/etc/udev/rules.d/99-hs80max.rules"
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="0a97", MODE="0660", GROUP="users"
 EOF
 "$SUDO" udevadm control --reload-rules && "$SUDO" udevadm trigger
+# The udev rule grants access to the 'users' group: make sure the invoking
+# user is a member, otherwise the daemon cannot open /dev/hidrawN.
+if ! id -nG | grep -qw users; then
+  "$SUDO" usermod -aG users "$USER"
+  echo "    note: added $USER to the 'users' group (takes effect at the next login)."
+fi
 
 echo "==> 3/6 Installing D-Bus session policy"
 # No per-user session.conf.d exists, so the policy goes system-wide.
@@ -82,5 +88,5 @@ echo "Verify:"
 echo "  systemctl --user status hs80max"
 echo "  journalctl --user -u hs80max -f"
 echo
-echo "Note: the wrapper pins this checkout at $REPO_DIR."
-echo "After updating the repo, re-run this script."
+echo "WARNING: the wrapper pins this checkout at $REPO_DIR."
+echo "After moving or updating the repo, re-run this script."

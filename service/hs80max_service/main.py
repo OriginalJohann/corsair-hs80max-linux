@@ -178,8 +178,8 @@ class Poller:
 
 def main() -> int:
     _configure_logging()
-    bus = SessionBus()
     try:
+        bus = SessionBus()
         # request_name with replace=True so that, if a stale instance of
         # this service is still holding the bus name (e.g. after an unclean
         # shutdown), this instance takes ownership instead of raising
@@ -189,6 +189,8 @@ def main() -> int:
         # self-heals rather than failing.
         bus.request_name(BUS_NAME, allow_replacement=True, replace=True)
     except Exception:
+        # Also covers a missing session bus (e.g. login race): a clean log
+        # line and exit 1 instead of a raw traceback crash-loop.
         log.exception("could not register D-Bus name %s", BUS_NAME)
         return 1
     service = HS80Service(bus)
@@ -204,14 +206,8 @@ def main() -> int:
     from gi.repository import GLib
 
     loop = GLib.MainLoop()
-    signal.signal(
-        signal.SIGTERM,
-        lambda *_: GLib.idle_add(loop.quit),
-    )
-    signal.signal(
-        signal.SIGINT,
-        lambda *_: GLib.idle_add(loop.quit),
-    )
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: GLib.idle_add(loop.quit))
     loop.run()
 
     log.info("shutting down")

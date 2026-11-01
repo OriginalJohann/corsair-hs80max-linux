@@ -106,6 +106,52 @@ def test_publish_from_non_main_thread_emits_signal_once() -> None:
     )
 
 
+def test_publish_and_property_read_from_threads_do_not_raise() -> None:
+    """Concurrent publish() and property reads must not raise.
+
+    publish() runs on the Poller thread; D-Bus property reads run on the
+    GLib main-loop thread. With the status lock in place both may race
+    without raising and without a torn snapshot.
+    """
+    svc, _ = _make_service()
+    errors: list[str] = []
+    stop = threading.Event()
+
+    def poller_work() -> None:
+        i = 0
+        while not stop.is_set():
+            try:
+                svc.publish(Status(
+                    mode="connected", battery=i % 101, mic_muted=i % 2 == 0,
+                ))
+            except Exception as exc:  # pragma: no cover - defensive
+                errors.append(f"publish() raised: {exc!r}")
+                return
+            i += 1
+
+    def reader_work() -> None:
+        while not stop.is_set():
+            try:
+                _ = svc.Mode, svc.Battery, svc.MicMuted, svc.UpdatedAt
+                _ = svc.GetStatus()
+                _ = svc.GetBattery(), svc.GetMicMuted()
+            except Exception as exc:  # pragma: no cover - defensive
+                errors.append(f"property read raised: {exc!r}")
+                return
+
+    poller = threading.Thread(target=poller_work)
+    reader = threading.Thread(target=reader_work)
+    poller.start()
+    reader.start()
+    time.sleep(0.5)
+    stop.set()
+    poller.join(timeout=5)
+    reader.join(timeout=5)
+    assert not errors, errors
+
+
 if __name__ == "__main__":
     test_publish_from_non_main_thread_emits_signal_once()
+    test_publish_and_property_read_from_threads_do_not_raise()
     print("PASS: publish() from a non-main thread emitted StatusChanged exactly once.")
+    print("PASS: concurrent publish() and property reads did not raise.")
