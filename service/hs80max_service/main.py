@@ -17,6 +17,7 @@ import logging.handlers
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 
 from pydbus import SessionBus
@@ -178,20 +179,37 @@ class Poller:
 
 def main() -> int:
     _configure_logging()
-    try:
-        bus = SessionBus()
-        # request_name with replace=True so that, if a stale instance of
-        # this service is still holding the bus name (e.g. after an unclean
-        # shutdown), this instance takes ownership instead of raising
-        # "name already exists on the bus" and crash-looping. allow_
-        # replacement=True lets a *newer* instance take over from this
-        # one as well, so the always-newest instance wins and the daemon
-        # self-heals rather than failing.
-        bus.request_name(BUS_NAME, allow_replacement=True, replace=True)
-    except Exception:
-        # Also covers a missing session bus (e.g. login race): a clean log
-        # line and exit 1 instead of a raw traceback crash-loop.
-        log.exception("could not register D-Bus name %s", BUS_NAME)
+    bus = None
+    # The session bus reads its policy files only at ITS start. After a plain
+    # reboot the policy file (installed by the activation script into the
+    # volatile /run/dbus) is absent for a short window, so owning the bus
+    # name is refused even though the bus itself is reachable. Retry for a
+    # bounded time: the unit is ordered After=dbus.socket (fresh bus at boot,
+    # where this window is real) and Before=dbus.service (we join the very
+    # first bus), and once the policy file exists the freshly started bus
+    # keeps it for the whole session. A policy miss is a transient condition,
+    # not a fatal one: without this the unit crash-loops at every boot.
+    for _ in range(15):
+        try:
+            candidate = SessionBus()
+            # request_name with replace=True so that, if a stale instance of
+            # this service is still holding the bus name (e.g. after an unclean
+            # shutdown), this instance takes ownership instead of raising
+            # "name already exists on the bus" and crash-looping. allow_
+            # replacement=True lets a *newer* instance take over from this
+            # one as well, so the always-newest instance wins and the daemon
+            # self-heals rather than failing.
+            candidate.request_name(BUS_NAME, allow_replacement=True, replace=True)
+            bus = candidate
+            break
+        except Exception:
+            # Also covers a missing session bus (e.g. login race): a clean log
+            # line and bounded wait instead of a raw traceback crash-loop.
+            log.warning("D-Bus name %s not (yet) available, retrying in 2 s",
+                        BUS_NAME)
+            time.sleep(2)
+    if bus is None:
+        log.error("could not register D-Bus name %s", BUS_NAME)
         return 1
     service = HS80Service(bus)
     bus.register_object(OBJECT_PATH, service, INTROSPECTION_XML)

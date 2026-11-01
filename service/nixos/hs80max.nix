@@ -115,7 +115,15 @@ in
     # "name already exists on the bus".
     systemd.user.services.hs80max = {
       description = "Corsair HS80 Max status service (battery, connection mode)";
-      after = [ "graphical-session.target" ];
+      after = [ "graphical-session.target" "dbus.socket" ];
+      # Join the FIRST session bus of the boot: the bus reads its policy
+      # files only at its own start, and the policy file lands in the
+      # volatile /run/dbus only via the activation script (absent right
+      # after a plain reboot). Being ordered Before=dbus.service means we
+      # are the one that triggers the fresh bus and thus get a bus whose
+      # policy load includes our file as soon as it exists (the daemon
+      # retries owning the name for up to ~30 s in the meantime).
+      before = [ "dbus.service" ];
       wantedBy = [ "default.target" ];
       serviceConfig = {
         Type = "simple";
