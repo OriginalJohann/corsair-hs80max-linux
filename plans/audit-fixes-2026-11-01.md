@@ -43,15 +43,11 @@ deletions and doc fixes last. Each step is independent and committable.
   and fix the header + inline comments to say "file monitor + 1 min poll",
   not "D-Bus signal match + 30-min fallback". Rename-only, no behavior change.
 
-### Step 5 – Delete the foreign shell file (finding 4)
-- Delete `vscode_shell.nix` (PHP/Composer/Node shell, zero references to
-  this project). Not part of the flake, nothing imports it.
-
-### Step 6 – Lean the dev shell (finding 6)
+### Step 5 – Lean the dev shell (finding 6)
 - `shells/dev.nix`: remove `python3Packages.pyusb` (grep-verified: no
   `import usb` in any project code).
 
-### Step 7 – Docs and comments (findings 7, 8, 9)
+### Step 6 – Docs and comments (findings 7, 8, 9)
 - `connection.py` module docstring: describe the real three states
   (connected / off / disconnected), not the old two.
 - `extension.js`: fix the two "30-minute" comments around the 60 s
@@ -67,6 +63,8 @@ deletions and doc fixes last. Each step is independent and committable.
    otherwise manual reload in `dbus-run-session -- gnome-shell --devkit`
 
 ## Not done / skipped
+- Finding 4 (`vscode_shell.nix`): dropped from this plan on purpose –
+  personal VSCode dev shell, not a finding.
 - No commit yet: ask the user for confirmation before committing
   (AGENTS.md §7). Suggested message:
   "fix: keep sticky state during dongle replug; add protocol tests; drop dead code and stale docs"
