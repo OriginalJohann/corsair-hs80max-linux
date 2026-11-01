@@ -116,7 +116,7 @@ journalctl --user -u hs80max -f
 
 # Status, den der Daemon aktuell meldet:
 cat "$XDG_RUNTIME_DIR/hs80max/status.json"
-# → z. B. {"mode": "dongle", "battery": 87, "mic_muted": false, "updated_at": ...}
+# → z. B. {"mode": "connected", "battery": 87, "mic_muted": false, "updated_at": ...}
 
 # D-Bus direkt abfragen:
 dbus-send --session --print-reply --dest=com.corsair.hs80max \
