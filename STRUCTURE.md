@@ -8,6 +8,7 @@ corsair-hs80max-linux/
 ├── AGENTS.md                  # Agent instructions & workflow guidelines
 ├── INSTRUCTIONS.md            # Original task specification
 ├── NIXOS-SETUP.md             # Guide: module integration into a flake NixOS config
+├── install.sh                 # Installer for non-NixOS systems (udev, D-Bus, user unit, extension)
 ├── README.md                  # Project overview (updated in Phase 3)
 ├── STRUCTURE.md               # This file – keep in sync with changes
 ├── plans/                     # Planning files (currently empty)
