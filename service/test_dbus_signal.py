@@ -134,7 +134,6 @@ def test_publish_and_property_read_from_threads_do_not_raise() -> None:
             try:
                 _ = svc.Mode, svc.Battery, svc.MicMuted, svc.UpdatedAt
                 _ = svc.GetStatus()
-                _ = svc.GetBattery(), svc.GetMicMuted()
             except Exception as exc:  # pragma: no cover - defensive
                 errors.append(f"property read raised: {exc!r}")
                 return

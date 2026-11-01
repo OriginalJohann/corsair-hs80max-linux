@@ -32,10 +32,6 @@ sleep 10
 
 echo "=== GetStatus ==="
 timeout 5 dbus-send --print-reply --dest=com.corsair.hs80max /com/corsair/hs80max com.corsair.hs80max.GetStatus 2>&1 || echo "(timeout or error)"
-echo "=== GetBattery ==="
-timeout 5 dbus-send --print-reply --dest=com.corsair.hs80max /com/corsair/hs80max com.corsair.hs80max.GetBattery 2>&1 || echo "(timeout or error)"
-echo "=== GetMicMuted ==="
-timeout 5 dbus-send --print-reply --dest=com.corsair.hs80max /com/corsair/hs80max com.corsair.hs80max.GetMicMuted 2>&1 || echo "(timeout or error)"
 echo "=== Property Mode ==="
 timeout 5 gdbus call --session --dest com.corsair.hs80max --object-path /com/corsair/hs80max \
   --method org.freedesktop.DBus.Properties.Get com.corsair.hs80max Mode 2>&1 || echo "(timeout or error)"

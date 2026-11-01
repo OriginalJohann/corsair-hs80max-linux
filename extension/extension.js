@@ -39,14 +39,6 @@ const BUS_NAME = 'com.corsair.hs80max';
 const OBJECT_PATH = '/com/corsair/hs80max';
 const INTERFACE = 'com.corsair.hs80max';
 
-// Status file the daemon rewrites on every change (see dbus_api.py). We watch
-// it with a GFile monitor for live updates because this GJS build drops D-Bus
-// signal callbacks. Must stay in sync with HS80Service._status_file_path.
-// No hardcoded UID fallback: when XDG_RUNTIME_DIR is unset the file monitor
-// is skipped in _startFileMonitor() (the 1-minute poll still works).
-const STATUS_FILE =
-    `${GLib.getenv('XDG_RUNTIME_DIR')}/hs80max/status.json`;
-
 // systemd user unit that provides the D-Bus service. enable() makes sure it
 // is running so the extension is self-contained; disable() intentionally does
 // NOT stop it (independent user service, survives reloads, reusable by other
@@ -505,7 +497,12 @@ export default class Hs80MaxExtension extends Extension {
             return;
         }
         try {
-            const file = Gio.File.new_for_path(STATUS_FILE);
+            // Built locally (not at module load) so a XDG_RUNTIME_DIR that
+            // appears after shell startup is picked up. The guard above
+            // guarantees the env var is set here.
+            const statusFile =
+                `${GLib.getenv('XDG_RUNTIME_DIR')}/hs80max/status.json`;
+            const file = Gio.File.new_for_path(statusFile);
             this._fileMonitor = file.monitor(Gio.FileMonitorFlags.NONE, null);
             this._fileMonitor.connect('changed',
                 (f, other, ev) => this._onStatusFileChanged());

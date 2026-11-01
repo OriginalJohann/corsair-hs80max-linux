@@ -37,7 +37,6 @@ corsair-hs80max-linux/
 │   ├── extension.js           # D-Bus client (com.corsair.hs80max) + tray UI
 │   │                          # (PanelMenu.Button via Main.panel.addToStatusArea,
 │   │                          #  left box, like the appindicator extension)
-│   ├── main.js                # Re-export shim (upstream builds load main.js)
 │   ├── stylesheet.css
 │   └── icons/
 │       ├── headset-disconnected-symbolic.svg

@@ -5,8 +5,7 @@ Exposes ``com.corsair.hs80max`` on the session bus with:
 * Properties: ``Mode`` (s: ``disconnected`` | ``off`` | ``connected``),
   ``Battery`` (i, -1 = unavailable),
   ``MicMuted`` (b), ``UpdatedAt`` (t, epoch ms)
-* Methods:    ``GetStatus() -> a{sv}``, ``GetBattery() -> i``,
-              ``GetMicMuted() -> b``
+* Methods:    ``GetStatus() -> a{sv}``
 * Signal:     ``StatusChanged(mode: s, battery: i, mic_muted: b)``
 
 Built on ``pydbus`` (available in ``shells/dev.nix``).
@@ -37,12 +36,6 @@ INTROSPECTION_XML = """
   <interface name="com.corsair.hs80max">
     <method name="GetStatus">
       <arg name="status" type="a{sv}" direction="out"/>
-    </method>
-    <method name="GetBattery">
-      <arg name="battery" type="i" direction="out"/>
-    </method>
-    <method name="GetMicMuted">
-      <arg name="muted" type="b" direction="out"/>
     </method>
     <property name="Mode" type="s" access="read"/>
     <property name="Battery" type="i" access="read"/>
@@ -119,14 +112,6 @@ class HS80Service:
                 "MicMuted": GLib.Variant("b", status.mic_muted),
                 "UpdatedAt": GLib.Variant("t", int(status.updated_at * 1000)),
             }
-
-    def GetBattery(self) -> int:
-        with self._lock:
-            return self._status.battery
-
-    def GetMicMuted(self) -> bool:
-        with self._lock:
-            return self._status.mic_muted
 
     # ------------------------------------------------------ status file
     # This GJS build cannot deliver D-Bus signals to the extension (the
