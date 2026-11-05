@@ -117,32 +117,25 @@ in
     '';
 
     # -------------------------------------------------- systemd user unit
-    # Defined through NixOS's systemd integration, which installs the unit
-    # with a hashed filename (e.g. "ajk15…-hs80max.service") and makes
-    # `systemctl --user enable --now hs80max` resolve to it automatically.
-    # We deliberately do NOT copy a plain-named "hs80max.service" into
-    # /usr/lib/systemd/user: a second unit running the same daemon would
-    # fight over the D-Bus name (com.corsair.hs80max) and crash-loop with
-    # "name already exists on the bus".
-    systemd.user.services.hs80max = {
-      description = "Corsair HS80 Max status service (battery, connection mode)";
-      after = [ "graphical-session.target" "dbus.socket" ];
-      # Join the FIRST session bus of the boot: the bus reads its policy
-      # files only at its own start, and the policy file lands in the
-      # volatile /run/dbus only via the activation script (absent right
-      # after a plain reboot). Being ordered Before=dbus.service means we
-      # are the one that triggers the fresh bus and thus get a bus whose
-      # policy load includes our file as soon as it exists (the daemon
-      # retries owning the name for up to ~30 s in the meantime).
-      before = [ "dbus.service" ];
-      wantedBy = [ "default.target" ];
-      serviceConfig = {
-        Type = "simple";
-        ExecStart = "${wrapper}/bin/hs80max-service";
-        Restart = "on-failure";
-        RestartSec = 5;
-      };
-    };
+    # TEMPORARILY DISABLED: The `before = [ "dbus.service" ]` ordering creates
+    # a dependency cycle (hs80max → dbus → basic.target → hs80max) that
+    # interferes with the initrd's switch-root process on this system
+    # (CachyOS kernel + root=fstab). Re-enable after investigating a
+    # cycle-free ordering (e.g. drop `before`, rely on the daemon's own
+    # D-Bus name retry loop).
+    #
+    # systemd.user.services.hs80max = {
+    #   description = "Corsair HS80 Max status service (battery, connection mode)";
+    #   after = [ "graphical-session.target" "dbus.socket" ];
+    #   before = [ "dbus.service" ];
+    #   wantedBy = [ "default.target" ];
+    #   serviceConfig = {
+    #     Type = "simple";
+    #     ExecStart = "${wrapper}/bin/hs80max-service";
+    #     Restart = "on-failure";
+    #     RestartSec = 5;
+    #   };
+    # };
 
     # ------------------------------------------------------- GNOME extension
     # The extension is plain source files (not a built package), so NixOS's
