@@ -81,17 +81,24 @@ in
     # on `PATH`, so a bare `systemctl` (or `env … systemctl`) fails with
     # "file not found". `runuser` also resets the target user's environment
     # (PATH, etc.), so `XDG_RUNTIME_DIR` is set *inside* each invocation via an
-    # absolute `env`, guaranteeing the user bus is found. Skipped when the user
-    # session is not running (logged out / server boot).
+    # absolute `env`, guaranteeing the user bus is found.
+    #
+    # FAIL-SAFE: activation scripts also run at boot (after `nixos-rebuild
+    # boot`) and a non-zero exit aborts the whole activation, which can make
+    # the machine unbootable. At boot the user session, D-Bus and the unit are
+    # often not ready yet, so `start` can fail. Every command that can fail is
+    # therefore guarded so this script ALWAYS exits 0 and can never break a
+    # boot or a switch.
     system.activationScripts.hs80max-restart.text = ''
       set -e
       uid=$(id -u ${cfg.user} 2>/dev/null) || exit 0
       [ -d /run/user/$uid ] || exit 0
       env=/run/current-system/sw/bin/env
       systemctl=/run/current-system/sw/bin/systemctl
-      runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user daemon-reload
+      runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user daemon-reload || true
       runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user stop hs80max.service || true
-      runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user start hs80max.service
+      runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user start hs80max.service || true
+      exit 0
     '';
 
     # ------------------------------------------------------- D-Bus session
@@ -100,9 +107,13 @@ in
     # session bus only reads policies from /etc/dbus-1/session.conf.d and
     # /run/dbus/session.conf.d, so the activation script copies it to the
     # latter (read by the daemon at session-bus start).
+    #
+    # FAIL-SAFE: guard the copy so a transient failure can never abort the
+    # activation (see the hs80max-restart note above).
     system.activationScripts.hs80max-dbus.text = ''
-      mkdir -p /run/dbus/session.conf.d
-      cp ${dbusConf} /run/dbus/session.conf.d/
+      mkdir -p /run/dbus/session.conf.d || exit 0
+      cp ${dbusConf} /run/dbus/session.conf.d/ || exit 0
+      exit 0
     '';
 
     # -------------------------------------------------- systemd user unit
@@ -142,10 +153,17 @@ in
     # may only exist via home-manager, so `users.users.<user>.home` must not
     # be referenced). The shell picks the new files up on the next restart
     # (Alt+F2 → r).
+    #
+    # FAIL-SAFE: the home directory may not exist yet at boot (the user may be
+    # created only via home-manager, which materialises the home at login). A
+    # failing copy must never abort the activation, so every step is guarded
+    # and the script always exits 0.
     system.activationScripts.hs80max-extension.text = ''
       extDir=/home/${cfg.user}/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev
-      mkdir -p "$extDir"
-      cp -r ${extensionDir}/. "$extDir"/
+      [ -d /home/${cfg.user} ] || exit 0
+      mkdir -p "$extDir" || exit 0
+      cp -r ${extensionDir}/. "$extDir"/ || exit 0
+      exit 0
     '';
   };
 }
