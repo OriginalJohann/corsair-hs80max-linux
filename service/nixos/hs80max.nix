@@ -158,11 +158,25 @@ in
     # created only via home-manager, which materialises the home at login). A
     # failing copy must never abort the activation, so every step is guarded
     # and the script always exits 0.
+    #
+    # NO EMPTY LEFTOVERS: a previous version ran `mkdir -p` before `cp`, so a
+    # failing copy (e.g. the flake input predates the extension/ directory)
+    # left an EMPTY extension directory behind. GNOME then finds the UUID
+    # (via dconf enabled-extensions) but fails with "Missing metadata.json".
+    # The source is therefore validated first, and any incomplete copy is
+    # rolled back so a half-installed extension can never be loaded.
     system.activationScripts.hs80max-extension.text = ''
+      # Validate the source BEFORE touching the home dir: if the flake input
+      # does not contain the extension, leave the system completely alone.
+      [ -f ${extensionDir}/metadata.json ] || exit 0
       extDir=/home/${cfg.user}/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev
       [ -d /home/${cfg.user} ] || exit 0
       mkdir -p "$extDir" || exit 0
-      cp -r ${extensionDir}/. "$extDir"/ || exit 0
+      if ! cp -r ${extensionDir}/. "$extDir"/ 2>/dev/null; then
+        # Roll back: never leave an incomplete extension set behind.
+        rm -rf "$extDir"
+        exit 0
+      fi
       exit 0
     '';
   };
