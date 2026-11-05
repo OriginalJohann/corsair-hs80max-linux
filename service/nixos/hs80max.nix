@@ -66,64 +66,33 @@ in
       SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="0a97", MODE="0660", GROUP="users"
     '';
 
-    # ------------------------------------------------- auto-restart on switch
-    # `nixos-rebuild switch` does NOT restart systemd *user* services (a known
-    # NixOS gap), so the running unit would keep the previous store path until
-    # the next login. This activation script restarts the service on every
-    # switch, so it always tracks the current build.
-    #
-    # Only `stop`+`start` (never a bare `start`): `start` is a no-op when the
-    # unit is already active, so the old instance would survive as a duplicate
-    # fighting over the D-Bus name. `stop` first guarantees a single instance.
-    #
-    # `systemctl` is referenced by absolute path: the activation context and the
-    # `runuser`'d user environment do not reliably have the NixOS store bin dir
-    # on `PATH`, so a bare `systemctl` (or `env … systemctl`) fails with
-    # "file not found". `runuser` also resets the target user's environment
-    # (PATH, etc.), so `XDG_RUNTIME_DIR` is set *inside* each invocation via an
-    # absolute `env`, guaranteeing the user bus is found.
-    #
-    # FAIL-SAFE: activation scripts also run at boot (after `nixos-rebuild
-    # boot`) and a non-zero exit aborts the whole activation, which can make
-    # the machine unbootable. At boot the user session, D-Bus and the unit are
-    # often not ready yet, so `start` can fail. Every command that can fail is
-    # therefore guarded so this script ALWAYS exits 0 and can never break a
-    # boot or a switch.
-    system.activationScripts.hs80max-restart.text = ''
-      set -e
-      uid=$(id -u ${cfg.user} 2>/dev/null) || exit 0
-      [ -d /run/user/$uid ] || exit 0
-      env=/run/current-system/sw/bin/env
-      systemctl=/run/current-system/sw/bin/systemctl
-      runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user daemon-reload || true
-      runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user stop hs80max.service || true
-      runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user start hs80max.service || true
-      exit 0
-    '';
+    # ============================================================
+    # ALL COMPONENTS BELOW ARE TEMPORARILY DISABLED for boot-regression
+    # bisection. Only the udev rule above remains active.
+    # Re-enable incrementally to identify the boot-breaking component.
+    # ============================================================
 
-    # ------------------------------------------------------- D-Bus session
-    # Install the session-bus policy file so the user can own the bus name.
-    # NixOS has no first-class option for session bus policies, and the
-    # session bus only reads policies from /etc/dbus-1/session.conf.d and
-    # /run/dbus/session.conf.d, so the activation script copies it to the
-    # latter (read by the daemon at session-bus start).
-    #
-    # FAIL-SAFE: guard the copy so a transient failure can never abort the
-    # activation (see the hs80max-restart note above).
-    system.activationScripts.hs80max-dbus.text = ''
-      mkdir -p /run/dbus/session.conf.d || exit 0
-      cp ${dbusConf} /run/dbus/session.conf.d/ || exit 0
-      exit 0
-    '';
+    # --- hs80max-restart (DISABLED) ---
+    # system.activationScripts.hs80max-restart.text = ''
+    #   set -e
+    #   uid=$(id -u ${cfg.user} 2>/dev/null) || exit 0
+    #   [ -d /run/user/$uid ] || exit 0
+    #   env=/run/current-system/sw/bin/env
+    #   systemctl=/run/current-system/sw/bin/systemctl
+    #   runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user daemon-reload || true
+    #   runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user stop hs80max.service || true
+    #   runuser -u ${cfg.user} -- "$env" XDG_RUNTIME_DIR=/run/user/$uid "$systemctl" --user start hs80max.service || true
+    #   exit 0
+    # '';
 
-    # -------------------------------------------------- systemd user unit
-    # TEMPORARILY DISABLED: The `before = [ "dbus.service" ]` ordering creates
-    # a dependency cycle (hs80max → dbus → basic.target → hs80max) that
-    # interferes with the initrd's switch-root process on this system
-    # (CachyOS kernel + root=fstab). Re-enable after investigating a
-    # cycle-free ordering (e.g. drop `before`, rely on the daemon's own
-    # D-Bus name retry loop).
-    #
+    # --- hs80max-dbus (DISABLED) ---
+    # system.activationScripts.hs80max-dbus.text = ''
+    #   mkdir -p /run/dbus/session.conf.d || exit 0
+    #   cp ${dbusConf} /run/dbus/session.conf.d/ || exit 0
+    #   exit 0
+    # '';
+
+    # --- systemd user unit (DISABLED) ---
     # systemd.user.services.hs80max = {
     #   description = "Corsair HS80 Max status service (battery, connection mode)";
     #   after = [ "graphical-session.target" "dbus.socket" ];
@@ -137,40 +106,17 @@ in
     #   };
     # };
 
-    # ------------------------------------------------------- GNOME extension
-    # The extension is plain source files (not a built package), so NixOS's
-    # `gnome.gnome-shell.extensions` list cannot be used. It is installed the
-    # same way as the D-Bus policy above: an activation script copies it into
-    # the user's extensions directory, where GNOME finds it by the UUID in
-    # metadata.json. The destination is the standard /home/<user> (the user
-    # may only exist via home-manager, so `users.users.<user>.home` must not
-    # be referenced). The shell picks the new files up on the next restart
-    # (Alt+F2 → r).
-    #
-    # FAIL-SAFE: the home directory may not exist yet at boot (the user may be
-    # created only via home-manager, which materialises the home at login). A
-    # failing copy must never abort the activation, so every step is guarded
-    # and the script always exits 0.
-    #
-    # NO EMPTY LEFTOVERS: a previous version ran `mkdir -p` before `cp`, so a
-    # failing copy (e.g. the flake input predates the extension/ directory)
-    # left an EMPTY extension directory behind. GNOME then finds the UUID
-    # (via dconf enabled-extensions) but fails with "Missing metadata.json".
-    # The source is therefore validated first, and any incomplete copy is
-    # rolled back so a half-installed extension can never be loaded.
-    system.activationScripts.hs80max-extension.text = ''
-      # Validate the source BEFORE touching the home dir: if the flake input
-      # does not contain the extension, leave the system completely alone.
-      [ -f ${extensionDir}/metadata.json ] || exit 0
-      extDir=/home/${cfg.user}/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev
-      [ -d /home/${cfg.user} ] || exit 0
-      mkdir -p "$extDir" || exit 0
-      if ! cp -r ${extensionDir}/. "$extDir"/ 2>/dev/null; then
-        # Roll back: never leave an incomplete extension set behind.
-        rm -rf "$extDir"
-        exit 0
-      fi
-      exit 0
-    '';
+    # --- hs80max-extension (DISABLED) ---
+    # system.activationScripts.hs80max-extension.text = ''
+    #   [ -f ${extensionDir}/metadata.json ] || exit 0
+    #   extDir=/home/${cfg.user}/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev
+    #   [ -d /home/${cfg.user} ] || exit 0
+    #   mkdir -p "$extDir" || exit 0
+    #   if ! cp -r ${extensionDir}/. "$extDir"/ 2>/dev/null; then
+    #     rm -rf "$extDir"
+    #     exit 0
+    #   fi
+    #   exit 0
+    # '';
   };
 }
