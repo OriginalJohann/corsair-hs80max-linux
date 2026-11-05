@@ -106,6 +106,41 @@ def test_publish_from_non_main_thread_emits_signal_once() -> None:
     )
 
 
+def test_publish_writes_status_file_with_current_values(tmp_path, monkeypatch) -> None:
+    """publish() must (re)write the status file the extension watches.
+
+    This GJS build drops D-Bus signal callbacks, so the file at
+    ``$XDG_RUNTIME_DIR/hs80max/status.json`` is the extension's *actual*
+    data path. This test pins its location, JSON shape and values, and
+    checks the atomic write leaves no temp file behind.
+    """
+    import json
+    import os
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    svc, _ = _make_service()
+
+    # Publishing a changed status must write the file (default status is
+    # disconnected/-1/True, so this is a change).
+    svc.publish(Status(mode="connected", battery=73, mic_muted=False))
+
+    path = tmp_path / "hs80max" / "status.json"
+    assert path.is_file(), "status file was not written"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["mode"] == "connected"
+    assert payload["battery"] == 73
+    assert payload["mic_muted"] is False
+    assert isinstance(payload["updated_at"], int)  # epoch ms
+    # Atomic os.replace() must not leave the temp file behind.
+    assert not path.with_name(path.name + ".tmp").exists()
+
+    # A second publish of the SAME values must not rewrite the file:
+    # the extension treats file events as "status changed" wake-ups.
+    before = os.path.getmtime(path)
+    svc.publish(Status(mode="connected", battery=73, mic_muted=False))
+    assert os.path.getmtime(path) == before
+
+
 def test_publish_and_property_read_from_threads_do_not_raise() -> None:
     """Concurrent publish() and property reads must not raise.
 

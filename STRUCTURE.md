@@ -18,7 +18,8 @@ corsair-hs80max-linux/
 │   ├── reference_corsair_device.hpp     # Protocol reference (Sapd/HeadsetControl)
 │   └── reference_corsair_void_v2w.hpp   # Protocol reference (Sapd/HeadsetControl)
 ├── shells/
-│   └── dev.nix                # Nix development shell (python3, pydbus, dbus, wireplumber)
+│   ├── dev.nix                # Nix development shell (python3, pydbus, dbus, wireplumber)
+│   └── test.nix               # Nix test shell (python3, pytest, pydbus) – runs the pytest suite
 ├── service/                   # Background service (Python, D-Bus) – Phase 1
 │   ├── hs80max_service/
 │   │   ├── __init__.py

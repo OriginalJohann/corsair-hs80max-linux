@@ -35,8 +35,10 @@ def dongle_present() -> bool:
     for entry in os.listdir(USB_DEVICES_DIR):
         dev = os.path.join(USB_DEVICES_DIR, entry)
         try:
-            vid = open(os.path.join(dev, "idVendor"), encoding="ascii").read().strip()
-            pid = open(os.path.join(dev, "idProduct"), encoding="ascii").read().strip()
+            with open(os.path.join(dev, "idVendor"), encoding="ascii") as fh:
+                vid = fh.read().strip()
+            with open(os.path.join(dev, "idProduct"), encoding="ascii") as fh:
+                pid = fh.read().strip()
         except OSError:
             continue
         if vid.lower() == DONGLE_VENDOR and pid.lower() == DONGLE_PRODUCT:

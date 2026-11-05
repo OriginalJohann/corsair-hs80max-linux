@@ -75,20 +75,23 @@ const ICON_SIZE = 16;
 // Gio.Subprocess API, so we drive the classic GLib spawn functions directly.
 // These wrap the "run a command, get its exit status" case used for systemctl.
 
-// Synchronously run `args`, return { ok, status } where `status` is the
-// process exit code. `args` are simple tokens (no unquoted spaces) - our
-// callers only pass systemctl subcommands.
+// Synchronously run `args` (argv array, no shell parsing), return
+// { ok, status } where `status` is the process exit code. Passing the
+// argv array directly keeps future callers with dynamic arguments safe
+// from shell-style metacharacter injection.
 function _spawnSync(args) {
-    const [ok, , , waitStatus] =
-        GLib.spawn_command_line_sync(args.join(' '));
-    return { ok, status: (waitStatus >> 8) & 0xff };
+    const [ok, status] = GLib.spawn_sync(
+        null, args, null, GLib.SpawnFlags.DEFAULT, null, null);
+    return { ok, status };
 }
 
-// Fire-and-forget spawn. Returns true on success, false on failure. Used for
-// launching a GUI app (pavucontrol) so the shell keeps running.
+// Fire-and-forget spawn (argv array, no shell parsing). Returns true on
+// success, false on failure. Used for launching a GUI app (pavucontrol)
+// so the shell keeps running.
 function _spawnDetached(args) {
     try {
-        return GLib.spawn_command_line_async(args.join(' '));
+        return GLib.spawn_async(
+            null, args, null, GLib.SpawnFlags.DEFAULT, null, null);
     } catch (e) {
         console.warn('hs80max: spawn failed for ' + JSON.stringify(args)
             + ': ' + e.message);
