@@ -401,10 +401,6 @@ export default class Hs80MaxExtension extends Extension {
         this._menuUpdated = null;
 
         if (this._statusButton) {
-            // addToStatusArea() registered us; clear the entry so the panel
-            // does not keep a dangling reference (same as appindicator does).
-            if (Main.panel && Main.panel.statusArea)
-                Main.panel.statusArea['hs80max'] = null;
             try {
                 if (this._statusButton.parent)
                     this._statusButton.parent.remove_child(this._statusButton);
@@ -429,76 +425,82 @@ export default class Hs80MaxExtension extends Extension {
         if (!bus)
             return;
 
-        let ok = false;
-        let status = null;
-
-        try {
-            const reply = bus.call_sync(
-                BUS_NAME,
-                OBJECT_PATH,
-                INTERFACE,
-                'GetStatus',
-                new GLib.Variant('()', []),
-                null,
-                0,
-                CALL_TIMEOUT_MS,
-                null,
-            );
-            if (reply) {
-                // The reply is a `a{sv}` dictionary. Note: `get_dict()` is NOT
-                // available on GLib.Variant in modern GJS (the old wrapper
-                // helper was removed), so unpack the variant recursively
-                // into plain JS values. For a dictionary variant this yields
-                // an array with the dictionary object as its single element.
-                const dict = reply.recursiveUnpack()[0] ?? {};
-                status = {
-                    mode: typeof dict['Mode'] === 'string'
-                        ? dict['Mode'] : 'disconnected',
-                    battery: typeof dict['Battery'] === 'number'
-                        ? dict['Battery'] : -1,
-                    micMuted: typeof dict['MicMuted'] === 'boolean'
-                        ? dict['MicMuted'] : true,
-                    updatedAt: typeof dict['UpdatedAt'] === 'number'
-                        ? dict['UpdatedAt'] : 0,
-                };
-                ok = true;
-            }
-        } catch (e) {
-            // Expected while the daemon is down (name not known, service not
-            // known, timeout). Treated as "disconnected" below.
-            ok = false;
-        }
-
-        if (ok) {
-            this._applyStatus(status.mode, status.battery, status.micMuted,
-                status.updatedAt);
-            this._retries = 0;
-            if (this._retryId > 0) {
-                GLib.source_remove(this._retryId);
-                this._retryId = 0;
-            }
-        } else {
-            // Unknown mic state reads as muted (consistent with the service's
-            // own fallback and the icon logic below).
-            this._applyStatus('disconnected', -1, true, 0);
-            if (this._retries < RETRY_MAX) {
-                this._retries += 1;
-                if (this._retryId === 0) {
-                    this._retryId = GLib.timeout_add_seconds(
-                        GLib.PRIORITY_DEFAULT, RETRY_INTERVAL_S, () => {
-                            this._retryId = 0;
-                            this._readStatus();
-                            return false;
-                        });
+        // Asynchronous call: _readStatus() runs on the shell's main loop
+        // (1-minute poll, file-monitor events, startup retries), so a
+        // wedged daemon must not stall the UI. call_sync() with the 4 s
+        // timeout would freeze the top bar for the full timeout; call()
+        // returns immediately and the result arrives in the callback.
+        bus.call(
+            BUS_NAME,
+            OBJECT_PATH,
+            INTERFACE,
+            'GetStatus',
+            new GLib.Variant('()', []),
+            null,
+            0,
+            CALL_TIMEOUT_MS,
+            null,
+            (connection, result) => {
+                let ok = false;
+                let reply = null;
+                try {
+                    reply = connection.call_finish(result);
+                    ok = true;
+                } catch (e) {
+                    // Expected while the daemon is down (name not known,
+                    // service not known, timeout). Treated as
+                    // "disconnected" below.
+                    ok = false;
                 }
-            }
-        }
 
-        if (ok !== this._wasReachable) {
-            console.log('hs80max: ' + (ok ? 'daemon reachable'
-                : 'daemon unreachable'));
-            this._wasReachable = ok;
-        }
+                if (ok) {
+                    // The reply is a `a{sv}` dictionary. Note: `get_dict()`
+                    // is NOT available on GLib.Variant in modern GJS (the
+                    // old wrapper helper was removed), so unpack the variant
+                    // recursively into plain JS values. For a dictionary
+                    // variant this yields an array with the dictionary
+                    // object as its single element.
+                    const dict = reply.recursiveUnpack()[0] ?? {};
+                    this._applyStatus(
+                        typeof dict['Mode'] === 'string'
+                            ? dict['Mode'] : 'disconnected',
+                        typeof dict['Battery'] === 'number'
+                            ? dict['Battery'] : -1,
+                        typeof dict['MicMuted'] === 'boolean'
+                            ? dict['MicMuted'] : true,
+                        typeof dict['UpdatedAt'] === 'number'
+                            ? dict['UpdatedAt'] : 0,
+                    );
+                    this._retries = 0;
+                    if (this._retryId > 0) {
+                        GLib.source_remove(this._retryId);
+                        this._retryId = 0;
+                    }
+                } else {
+                    // Unknown mic state reads as muted (consistent with the
+                    // service's own fallback and the icon logic below).
+                    this._applyStatus('disconnected', -1, true, 0);
+                    if (this._retries < RETRY_MAX) {
+                        this._retries += 1;
+                        if (this._retryId === 0) {
+                            this._retryId = GLib.timeout_add_seconds(
+                                GLib.PRIORITY_DEFAULT, RETRY_INTERVAL_S,
+                                () => {
+                                    this._retryId = 0;
+                                    this._readStatus();
+                                    return false;
+                                });
+                        }
+                    }
+                }
+
+                if (ok !== this._wasReachable) {
+                    console.log('hs80max: ' + (ok ? 'daemon reachable'
+                        : 'daemon unreachable'));
+                    this._wasReachable = ok;
+                }
+            },
+        );
     }
 
     // Watch the daemon's status file for live updates. This GJS build drops

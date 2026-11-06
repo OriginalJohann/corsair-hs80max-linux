@@ -521,10 +521,3 @@ def test_poller_recovers_from_off_to_connected(monkeypatch) -> None:
     assert poller._mic_muted is True
     assert poller._published[-1].mode == "connected"
     assert poller._published[-1].battery == 80
-
-
-if __name__ == "__main__":
-    # Allow running without pytest (mirrors test_dbus_signal.py).
-    import pytest  # type: ignore[import-not-found]
-
-    sys.exit(pytest.main([__file__, "-v"]))

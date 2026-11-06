@@ -147,8 +147,3 @@ def test_publish_and_property_read_from_threads_do_not_raise() -> None:
     poller.join(timeout=5)
     reader.join(timeout=5)
     assert not errors, errors
-
-
-if __name__ == "__main__":
-    test_publish_and_property_read_from_threads_do_not_raise()
-    print("PASS: concurrent publish() and property reads did not raise.")

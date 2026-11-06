@@ -70,7 +70,12 @@ mkdir -p "$HOME/.config/systemd/user"
 cp "$REPO_DIR/service/hs80max.service" "$HOME/.config/systemd/user/hs80max.service"
 # PYTHONPATH must land in the [Service] section: it is a service setting, not
 # a unit setting, and sed inserts it right after the [Service] header.
-sed -i "s|^\[Service\]|[Service]\nEnvironment=PYTHONPATH=$REPO_DIR/service|" \
+# Escape sed replacement metacharacters in the checkout path so an unusual
+# directory name (e.g. containing '&', '\' or '|') cannot corrupt the unit.
+ESC_REPO_DIR=${REPO_DIR//\\/\\\\}
+ESC_REPO_DIR=${ESC_REPO_DIR//&/\\&}
+ESC_REPO_DIR=${ESC_REPO_DIR//|/\\|}
+sed -i "s|^\[Service\]|[Service]\nEnvironment=PYTHONPATH=$ESC_REPO_DIR/service|" \
   "$HOME/.config/systemd/user/hs80max.service"
 
 systemctl --user daemon-reload

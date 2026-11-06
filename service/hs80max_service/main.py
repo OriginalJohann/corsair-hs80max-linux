@@ -95,11 +95,12 @@ class Poller:
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:
-            # One poll cycle can take ~21 s in the worst case (failed wake
-            # handshake plus battery reads on an off headset, with reduced
-            # read timeouts), so the join budget must exceed a full cycle
-            # to let an in-flight cycle finish instead of being cut off.
-            self._thread.join(timeout=25)
+            # Worst-case poll cycle is ~81 s, not ~21 s: each of the 3 wake
+            # attempts can burn 4 writes × WRITE_TIMEOUT (5 s) plus a full
+            # read timeout, and a dongle that stops consuming reports makes
+            # every write time out. The join budget must exceed that so an
+            # in-flight cycle finishes instead of being cut off mid-write.
+            self._thread.join(timeout=90)
 
     def _run(self) -> None:
         while not self._stop.is_set():
