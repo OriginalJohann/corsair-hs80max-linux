@@ -272,19 +272,19 @@ export default class Hs80MaxExtension extends Extension {
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         // --- Detailed status rows (live) ---
-        this._menuMode = new PopupMenu.PopupMenuItem('Modus: –');
+        this._menuMode = new PopupMenu.PopupMenuItem('Mode: –');
         this._menuMode.actor.set_reactive(false);
         menu.addMenuItem(this._menuMode);
 
-        this._menuBattery = new PopupMenu.PopupMenuItem('Akku: –');
+        this._menuBattery = new PopupMenu.PopupMenuItem('Battery: –');
         this._menuBattery.actor.set_reactive(false);
         menu.addMenuItem(this._menuBattery);
 
-        this._menuMic = new PopupMenu.PopupMenuItem('Mikrofon: –');
+        this._menuMic = new PopupMenu.PopupMenuItem('Microphone: –');
         this._menuMic.actor.set_reactive(false);
         menu.addMenuItem(this._menuMic);
 
-        this._menuUpdated = new PopupMenu.PopupMenuItem('Aktualisiert: –');
+        this._menuUpdated = new PopupMenu.PopupMenuItem('Updated: –');
         this._menuUpdated.actor.set_reactive(false);
         menu.addMenuItem(this._menuUpdated);
 
@@ -294,9 +294,9 @@ export default class Hs80MaxExtension extends Extension {
         //     daemon. `addAction()` alone gives no hover cue and keeps the
         //     menu open, so both rows go through _addActionButton(). ---
         this._menuVolume = this._addActionButton(
-            menu, 'Lautstärke (System)', () => this._openVolumeApp());
+            menu, 'Volume (System)', () => this._openVolumeApp());
         this._menuRestart = this._addActionButton(
-            menu, 'Service neu starten', () => this._restartService());
+            menu, 'Restart service', () => this._restartService());
 
         // Reflect the current state on first build.
         this._updateMenuStatus();
@@ -322,10 +322,10 @@ export default class Hs80MaxExtension extends Extension {
 
 
     // Refresh the status summary + the detailed rows (mode / battery / mic /
-    // last update) inside the menu. Only "connected" with a valid battery
-    // reading counts as "verbunden"; the headset being powered off ("off"
-    // mode, battery -1) and the dongle being unplugged / daemon unreachable
-    // both present as "not connected".
+    // last update) inside the menu. Only mode "connected" with a valid
+    // battery reading counts as connected; the headset being powered off
+    // ("off" mode, battery -1) and the dongle being unplugged / daemon
+    // unreachable both present as "not connected".
     _updateMenuStatus() {
         if (!this._menuStatus)
             return;
@@ -339,27 +339,27 @@ export default class Hs80MaxExtension extends Extension {
         // Summary line.
         let summary;
         if (connected) {
-            summary = 'Verbunden · ' + batteryText
-                + (this._micMuted ? ' · Mikro stumm' : '');
+            summary = 'Connected · ' + batteryText
+                + (this._micMuted ? ' · Mic muted' : '');
         } else if (off) {
-            summary = 'Headset aus';
+            summary = 'Headset off';
         } else {
-            summary = 'Nicht verbunden';
+            summary = 'Not connected';
         }
         this._menuStatus.label.set_text(summary);
 
         // Detailed rows.
         if (this._menuMode)
             this._menuMode.label.set_text(
-                'Modus: ' + (connected ? 'verbunden'
-                    : (off ? 'aus (Dongle verbunden)' : 'getrennt')));
+                'Mode: ' + (connected ? 'connected'
+                    : (off ? 'off (dongle connected)' : 'disconnected')));
         if (this._menuBattery)
-            this._menuBattery.label.set_text('Akku: ' + batteryText);
+            this._menuBattery.label.set_text('Battery: ' + batteryText);
         if (this._menuMic)
             this._menuMic.label.set_text(
-                'Mikrofon: ' + (this._micMuted ? 'stumm' : 'aktiv'));
+                'Microphone: ' + (this._micMuted ? 'muted' : 'active'));
         if (this._menuUpdated)
-            this._menuUpdated.label.set_text('Aktualisiert: '
+            this._menuUpdated.label.set_text('Updated: '
                 + this._formatUpdatedAt());
     }
 
@@ -369,15 +369,15 @@ export default class Hs80MaxExtension extends Extension {
             return '–';
         const ageMs = Date.now() - this._updatedAt;
         if (ageMs < 15000)
-            return 'gerade eben';
+            return 'just now';
         const s = Math.round(ageMs / 1000);
         if (s < 60)
-            return 'vor ' + s + ' s';
+            return s + ' s ago';
         const m = Math.floor(s / 60);
         if (m < 60)
-            return 'vor ' + m + ' min';
+            return m + ' min ago';
         const h = Math.floor(m / 60);
-        return 'vor ' + h + ' h';
+        return h + ' h ago';
     }
 
     _destroyStatusIcon() {
