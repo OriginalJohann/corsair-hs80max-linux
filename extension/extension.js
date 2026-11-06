@@ -5,7 +5,7 @@
 // (mic muted / unmuted), followed by the battery
 // percentage as the button label. Clicking the button opens a popup with the
 // connection mode, battery level and microphone state, plus a menu entry to
-// launch pavucontrol (the system volume mixer).
+// launch the GNOME system sound panel (gnome-control-center sound).
 //
 // Status data is read from the hs80max-service daemon over the *session*
 // D-Bus (name `com.corsair.hs80max`, object `/com/corsair/hs80max`):
@@ -51,8 +51,13 @@ const ICON_CONNECTED = 'headset-connected-symbolic';
 const ICON_MIC_MUTED = 'mic-mute-symbolic';
 const ICON_MIC_UNMUTED = 'mic-unmute-symbolic';
 
-// Volume mixer launched from the menu (system-standard app).
-const VOLUME_APP = 'pavucontrol';
+// GNOME system sound panel binary. Resolved at launch time by walking
+// $PATH and picking the first *regular executable* entry: on NixOS the
+// /run/wrappers/bin entry can be a dangling symlink (stale wrapper
+// directory after a system activation), which makes a plain exec fail
+// with ENOENT even though the app is installed.
+const VOLUME_APP = 'gnome-control-center';
+const VOLUME_APP_ARGS = ['sound'];
 
 // Refresh cadence. The extension re-reads status on this interval as a
 // safety net in case a status-file monitor event is missed. Kept at 1 min
@@ -67,7 +72,6 @@ const RETRY_INTERVAL_S = 2;
 const RETRY_MAX = 5;
 // Size (px) of the two status icons shown side by side in the panel.
 const ICON_SIZE = 16;
-
 
 // ---- Small process-spawn helpers -----------------------------------------
 // GJS 1.88 removed Utils.spawn_sync / Utils.spawn_async and changed the
@@ -84,23 +88,35 @@ function _spawnSync(args) {
     return { ok, status };
 }
 
-// Fire-and-forget spawn (argv array, no shell parsing). Returns true on
-// success, false on failure. Used for launching a GUI app (pavucontrol)
-// so the shell keeps running.
-function _spawnDetached(args) {
-    try {
-        return GLib.spawn_async(
-            null, args, null, GLib.SpawnFlags.DEFAULT, null, null);
-    } catch (e) {
-        console.warn('hs80max: spawn failed for ' + JSON.stringify(args)
-            + ': ' + e.message);
-        return false;
+// Resolve `cmd` against $PATH, returning the full path of the first entry
+// that is a regular executable file, or null if none is found. Unlike a
+// plain exec, this skips dangling symlinks (e.g. the stale /run/wrappers/bin
+// entry on NixOS after a system activation).
+function _resolveInPath(cmd) {
+    const dirs = (GLib.getenv('PATH') || '').split(':');
+    for (const dir of dirs) {
+        if (dir === '')
+            continue;
+        try {
+            const file = Gio.file_new_for_path(dir + '/' + cmd);
+            const info = file.query_info('standard::type,access::can-execute', 0, null);
+            if (info && info.get_file_type() === Gio.FileType.REGULAR
+                && info.get_attribute_boolean('access::can-execute'))
+                return dir + '/' + cmd;
+        } catch (e) {
+            // Unreadable / non-existent entry – keep walking.
+        }
     }
+    return null;
 }
-
 
 export default class Hs80MaxExtension extends Extension {
     enable() {
+        // enable() may run twice without a disable() in between (shell
+        // reload races); tear down any existing UI first so we never end
+        // up with duplicate file monitors, buttons or spawned daemons.
+        if (this._pollId > 0)
+            this.disable();
         this._mode = 'disconnected';
         this._battery = -1;
         this._micMuted = true;
@@ -244,7 +260,7 @@ export default class Hs80MaxExtension extends Extension {
 
     // Build the menu contents: a live status summary, a detailed breakdown
     // (mode / battery / mic / last update) and a control entry that opens the
-    // system volume mixer (pavucontrol).
+    // system sound panel (gnome-control-center sound).
     _buildMenu() {
         const menu = this._menu;
 
@@ -278,7 +294,7 @@ export default class Hs80MaxExtension extends Extension {
         //     daemon. `addAction()` alone gives no hover cue and keeps the
         //     menu open, so both rows go through _addActionButton(). ---
         this._menuVolume = this._addActionButton(
-            menu, 'Lautstärke (PulseAudio)', () => this._openVolumeApp());
+            menu, 'Lautstärke (System)', () => this._openVolumeApp());
         this._menuRestart = this._addActionButton(
             menu, 'Service neu starten', () => this._restartService());
 
@@ -611,10 +627,24 @@ export default class Hs80MaxExtension extends Extension {
         this._updateMenuStatus();
     }
 
-    // Open the system volume mixer (pavucontrol). Spawned detached so the
-    // shell keeps running while the app is in the foreground.
+    // Open the system sound panel. The binary is resolved against $PATH by
+    // walking for the first regular executable (skipping dangling
+    // /run/wrappers symlinks), then spawned detached by full path.
     _openVolumeApp() {
-        _spawnDetached([VOLUME_APP]);
+        const bin = _resolveInPath(VOLUME_APP);
+        if (bin === null) {
+            console.warn('hs80max: ' + VOLUME_APP + ' not found in PATH');
+            return;
+        }
+        try {
+            const [ok] = GLib.spawn_async(
+                null, [bin, ...VOLUME_APP_ARGS], null,
+                GLib.SpawnFlags.DEFAULT, null, null);
+            if (!ok)
+                throw new Error('spawn failed');
+        } catch (e) {
+            console.warn('hs80max: could not open sound panel: ' + e.message);
+        }
     }
 
     // Restart the daemon (systemctl handles stop+start). The existing

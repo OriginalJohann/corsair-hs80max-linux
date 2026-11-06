@@ -53,6 +53,6 @@ corsair-hs80max-linux/
 - Dongle: USB `1b1c:0a97`, HID control on **interface 4** → `/dev/hidraw1`
 - Battery: proprietary HID protocol (see `resources/battery-protocol.md`), no USB Battery SUD
 - D-Bus service name: `com.corsair.hs80max` (session bus)
-- Status file: `$XDG_RUNTIME_DIR/hs80max/status.json` (live data path for the extension)
-- Volume app: `pavucontrol`
+- Status file: `$XDG_RUNTIME_DIR/hs80max/status.json` (live data path for the extension; rewritten on every status change and refreshed at most every 60 s to keep the mtime fresh)
+- Volume app: GNOME system sound panel (`gnome-control-center sound`)
 - Extension UUID: `hs80max@originaljohann.dev`

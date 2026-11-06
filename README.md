@@ -16,7 +16,7 @@ status is read from the dongle over a proprietary HID protocol on
 - **Microphone state** – muted / unmuted
 - **GNOME top-bar icons** – two symbolic icons (connection, microphone) to the
   left of the systray, plus battery percentage; clicking opens a detail popup
-- **Volume mixer** – the connection icon opens `pavucontrol`
+- **Volume mixer** – the connection icon opens the GNOME system sound panel (`gnome-control-center sound`)
 - **Live updates** – the extension refreshes whenever the service publishes a
   status change (via a watched status file), with a 1-minute fallback poll
 
@@ -54,7 +54,7 @@ status is read from the dongle over a proprietary HID protocol on
 - Python 3 with `pydbus` and `python3-gi` (bundled automatically on NixOS)
 - The HS80 Max USB dongle (a service without dongle simply reports
   `disconnected`)
-- `pavucontrol` for the volume-mixer shortcut
+- the GNOME system sound panel (`gnome-control-center sound`, resolved against `$PATH` to skip dangling NixOS wrapper symlinks) for the volume-mixer shortcut
 
 ## Deployment
 

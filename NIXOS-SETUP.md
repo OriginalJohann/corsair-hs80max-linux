@@ -7,7 +7,7 @@ components:
 | Component | What it does |
 |---|---|
 | **Service** (`hs80max.service`, systemd user unit) | Python daemon: reads the HS80 Max battery level, connection mode (dongle vs. USB-C) and microphone state via the HID protocol and exposes them over the D-Bus session (`com.corsair.hs80max`). |
-| **GNOME Extension** (`hs80max@originaljohann.dev`) | Shows two icons (connection, microphone) plus the battery percentage in the GNOME top bar; clicking opens details and `pavucontrol`. |
+| **GNOME Extension** (`hs80max@originaljohann.dev`) | Shows two icons (connection, microphone) plus the battery percentage in the GNOME top bar; clicking opens details and the GNOME system sound panel. |
 
 The module (`service/nixos/hs80max.nix`) creates:
 

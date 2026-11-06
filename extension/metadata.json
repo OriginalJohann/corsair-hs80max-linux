@@ -1,7 +1,7 @@
 {
   "uuid": "hs80max@originaljohann.dev",
   "name": "Corsair HS80 Max Status",
-  "description": "Shows connection status, microphone state and battery level for the Corsair HS80 Max headset in the GNOME top bar. Click to open details and the volume mixer (pavucontrol).",
+  "description": "Shows connection status, microphone state and battery level for the Corsair HS80 Max headset in the GNOME top bar. Click to open details and the system sound panel.",
   "version": "0.3.2",
   "shell-version": ["50"],
   "author": "OriginalJohann",
