@@ -8,10 +8,10 @@ corsair-hs80max-linux/
 ├── AGENTS.md                  # Agent instructions & workflow guidelines
 ├── INSTRUCTIONS.md            # Original task specification
 ├── NIXOS-SETUP.md             # Guide: module integration into a flake NixOS config
-├── install.sh                 # Installer for non-NixOS systems (udev, D-Bus, user unit, extension)
+├── install.sh                 # Installer for non-NixOS systems (udev, user unit, extension)
 ├── README.md                  # Project overview (updated in Phase 3)
 ├── STRUCTURE.md               # This file – keep in sync with changes
-├── plans/                     # Planning files (currently empty)
+├── plans/                     # Planning & audit files
 ├── resources/
 │   ├── battery-protocol.md    # HS80 Max HID battery protocol (verified)
 │   ├── produktblatt.pdf       # Product datasheet
@@ -23,16 +23,16 @@ corsair-hs80max-linux/
 ├── service/                   # Background service (Python, D-Bus) – Phase 1
 │   ├── hs80max_service/
 │   │   ├── __init__.py
-│   │   ├── main.py            # Daemon entry point
-│   │   ├── hid_protocol.py    # HID wake/battery/mic commands
+│   │   ├── main.py            # Daemon entry point + Poller (orchestration, sticky state)
+│   │   ├── hid_protocol.py    # HID I/O (open/read/write) + wake/battery/mic commands
 │   │   ├── connection.py      # Connection-mode detection (dongle vs. USB-C)
 │   │   └── dbus_api.py        # D-Bus interface com.corsair.hs80max
-│   ├── dbus/
-│   │   └── com.corsair.hs80max.conf  # D-Bus session policy
 │   ├── nixos/
-│   │   └── hs80max.nix        # NixOS module (udev + D-Bus + user service + GNOME extension)
-│   ├── hs80max.service        # systemd user unit
-│   └── test_dbus.sh           # E2E D-Bus test script
+│   │   └── hs80max.nix        # NixOS module (udev + user service + GNOME extension)
+│   ├── hs80max.service        # systemd user unit (single source for both install paths)
+│   ├── test_dbus.sh           # E2E D-Bus test script
+│   ├── test_dbus_signal.py    # D-Bus signal test (no hardware)
+│   └── test_hid_protocol.py   # Pytest unit tests (HID protocol, no hardware)
 ├── extension/                 # GNOME Shell extension (Shell 50) – Phase 2
 │   ├── metadata.json
 │   ├── extension.js           # D-Bus client (com.corsair.hs80max) + tray UI

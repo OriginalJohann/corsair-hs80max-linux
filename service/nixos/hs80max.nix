@@ -42,6 +42,20 @@ let
     sys.exit(main())
   '';
 
+  # The committed unit (service/hs80max.service) is the single source of
+  # truth; only the ExecStart line is replaced with the store wrapper.
+  # `unit` must be a *path* (the user-units builder runs basename on it),
+  # so the modified unit is written to the store as a real file.
+  unit = pkgs.writeTextFile {
+    name = "hs80max.service";
+    destination = "/hs80max.service";
+    text =
+      lib.replaceStrings
+        [ "ExecStart=/usr/bin/env python3 -m hs80max_service.main" ]
+        [ "ExecStart=${wrapper}/bin/hs80max-service" ]
+        (builtins.readFile (serviceDir + "/hs80max.service"));
+  };
+
   # GNOME Shell extension as a Nix package.
   # Installs to $out/share/gnome-shell/extensions/hs80max@originaljohann.dev,
   # which GNOME Shell discovers via /run/current-system/sw/share/gnome-shell/extensions/.
@@ -74,16 +88,13 @@ in
     environment.systemPackages = [ extensionPkg ];
 
     # -------------------------------------------------------- systemd user unit
-    systemd.user.services.hs80max = {
-      description = "Corsair HS80 Max status service (battery, connection mode)";
-      after = [ "graphical-session.target" "dbus.socket" ];
-      wantedBy = [ "default.target" ];
-      serviceConfig = {
-        Type = "simple";
-        ExecStart = "${wrapper}/bin/hs80max-service";
-        Restart = "on-failure";
-        RestartSec = 5;
-      };
+    # Generated from the committed unit (single source of truth); see
+    # `unit` above.  `systemd.user.units` is required because
+    # `systemd.user.services` does not support a custom unit.
+    systemd.user.units.hs80max = {
+      name = "hs80max.service";
+      enable = true;
+      unit = unit;
     };
   };
 }

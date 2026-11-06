@@ -1,8 +1,20 @@
 # systemd user unit for the HS80 Max status service.
 #
-# Install (manual, without the NixOS module):
+# This file is the single source of truth for the unit; both install paths
+# derive from it:
+#
+# * install.sh (non-NixOS): copies this unit to ~/.config/systemd/user/ and
+#   inserts Environment=PYTHONPATH=<checkout> into the [Service] section, so
+#   the committed ExecStart runs the daemon straight from the checkout.
+#
+# * service/nixos/hs80max.nix (NixOS): replaces the ExecStart line with the
+#   store wrapper script (pythonEnv + sys.path) and installs the result.
+#
+# Manual install (without install.sh):
 #   mkdir -p ~/.config/systemd/user
 #   cp service/hs80max.service ~/.config/systemd/user/
+#   sed -i "s|^\\[Service\\]|[Service]\\nEnvironment=PYTHONPATH=$(pwd)/service|" \
+#     ~/.config/systemd/user/hs80max.service
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now hs80max
 #
@@ -11,11 +23,11 @@
 
 [Unit]
 Description=Corsair HS80 Max status service (battery, connection mode)
-After=graphical-session.target
+After=graphical-session.target dbus.socket
 
 [Service]
 Type=simple
-ExecStart=/run/current-system/sw/bin/hs80max-service
+ExecStart=/usr/bin/env python3 -m hs80max_service.main
 Restart=on-failure
 RestartSec=5
 

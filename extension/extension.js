@@ -463,7 +463,9 @@ export default class Hs80MaxExtension extends Extension {
                 this._retryId = 0;
             }
         } else {
-            this._applyStatus('disconnected', -1, false, 0);
+            // Unknown mic state reads as muted (consistent with the service's
+            // own fallback and the icon logic below).
+            this._applyStatus('disconnected', -1, true, 0);
             if (this._retries < RETRY_MAX) {
                 this._retries += 1;
                 if (this._retryId === 0) {
@@ -534,15 +536,15 @@ export default class Hs80MaxExtension extends Extension {
     }
 
     // Start the 1-minute safety-fallback poll. The callback returns true so
-    // the source keeps firing until _stopPolling() removes it.
+    // the source keeps firing until _stopPolling() removes it. The daemon is
+    // NOT re-ensured here: spawning systemctl synchronously from the shell's
+    // main loop would block the UI; the unit's Restart=on-failure covers
+    // crash recovery.
     _startPolling() {
         if (this._pollId > 0)
             return;
         this._pollId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
             REFRESH_INTERVAL_S, () => {
-                // Re-ensure the daemon: if it died, start it again so the
-                // re-read below has something to talk to.
-                this._ensureDaemon();
                 this._readStatus();
                 return true;
             });

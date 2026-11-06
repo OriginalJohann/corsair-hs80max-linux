@@ -17,14 +17,13 @@ import logging.handlers
 import signal
 import sys
 import threading
-import time
 from pathlib import Path
 
 from pydbus import SessionBus
 
 from . import connection
 from .dbus_api import BUS_NAME, HS80Service, INTROSPECTION_XML, OBJECT_PATH, Status
-from .hid_protocol import HIDError, HIDNotFound, HS80HID
+from .hid_protocol import HIDAccessError, HIDError, HIDNotFound, HS80HID
 
 log = logging.getLogger("hs80max.main")
 
@@ -96,7 +95,11 @@ class Poller:
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:
-            self._thread.join(timeout=10)
+            # One poll cycle can take ~21 s in the worst case (failed wake
+            # handshake plus battery reads on an off headset, with reduced
+            # read timeouts), so the join budget must exceed a full cycle
+            # to let an in-flight cycle finish instead of being cut off.
+            self._thread.join(timeout=25)
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -108,7 +111,7 @@ class Poller:
 
     def _poll_once(self) -> None:
         # 1. Connection mode (fast, dongle-presence based).
-        mode = connection.connection_mode()
+        mode = "connected" if connection.dongle_present() else "disconnected"
         if mode == "disconnected":
             # The dongle is unplugged, so the last battery / mic values are
             # no longer meaningful.  Reset them to "unknown".
@@ -143,11 +146,14 @@ class Poller:
         Battery and mic keep their last known values when a single query
         fails.
 
-        A :class:`~hs80max_service.hid_protocol.HIDNotFound` (device node not
-        created yet after a dongle replug) is treated differently: the last
-        known power state is kept, because the node will appear within a
-        fraction of a second and the headset is very likely still on.  Any
-        other :class:`~hs80max_service.hid_protocol.HIDError` is a real
+        A :class:`~hs80max_service.hid_protocol.HIDNotFound` (device node
+        not created yet after a dongle replug) and an
+        :class:`~hs80max_service.hid_protocol.HIDAccessError` (no permission
+        on the node, e.g. missing group membership) are treated the same
+        way: the last known power state is kept, because the node will
+        appear / become accessible within a fraction of a second and the
+        headset is very likely still on.  Any other
+        :class:`~hs80max_service.hid_protocol.HIDError` is a real
         unreachable channel and sets ``headset_on`` to False for this cycle.
         """
         try:
@@ -157,10 +163,13 @@ class Poller:
                 headset_on, battery, mic = hid.status()
             finally:
                 hid.close()
-        except HIDNotFound as exc:
-            # Device node not present yet (dongle replug in progress): keep
-            # the last known power state so the mode does not flip to "off".
-            log.warning("HID device node not found yet: %s", exc)
+        except (HIDNotFound, HIDAccessError) as exc:
+            # Device node not present yet (dongle replug in progress) or the
+            # user lacks permission on it (e.g. not in the 'users' group
+            # after a fresh install): keep the last known power state so the
+            # mode does not flip to "off".  Both conditions are fixable
+            # without touching the headset, which is very likely still on.
+            log.warning("HID channel unavailable: %s", exc)
             return
         except HIDError as exc:
             log.warning("HID query failed: %s", exc)
@@ -179,38 +188,31 @@ class Poller:
 
 def main() -> int:
     _configure_logging()
+    # The session bus reads its policy files only at ITS start, and early at
+    # boot/login the bus may not be reachable (or the name not ownable) for
+    # a short window. Both are transient conditions, not fatal ones: the
+    # unit is ordered After=dbus.socket and runs with Restart=on-failure
+    # (RestartSec=5), so a failed start is retried by the init system
+    # instead of a busy loop in the daemon.
     bus = None
-    # The session bus reads its policy files only at ITS start. After a plain
-    # reboot the policy file (installed by the activation script into the
-    # volatile /run/dbus) is absent for a short window, so owning the bus
-    # name is refused even though the bus itself is reachable. Retry for a
-    # bounded time: the unit is ordered After=dbus.socket (fresh bus at boot,
-    # where this window is real) and Before=dbus.service (we join the very
-    # first bus), and once the policy file exists the freshly started bus
-    # keeps it for the whole session. A policy miss is a transient condition,
-    # not a fatal one: without this the unit crash-loops at every boot.
-    for _ in range(15):
-        try:
-            candidate = SessionBus()
-            # request_name with replace=True so that, if a stale instance of
-            # this service is still holding the bus name (e.g. after an unclean
-            # shutdown), this instance takes ownership instead of raising
-            # "name already exists on the bus" and crash-looping. allow_
-            # replacement=True lets a *newer* instance take over from this
-            # one as well, so the always-newest instance wins and the daemon
-            # self-heals rather than failing.
-            candidate.request_name(BUS_NAME, allow_replacement=True, replace=True)
-            bus = candidate
-            break
-        except Exception:
-            # Also covers a missing session bus (e.g. login race): a clean log
-            # line and bounded wait instead of a raw traceback crash-loop.
-            log.warning("D-Bus name %s not (yet) available, retrying in 2 s",
-                        BUS_NAME)
-            time.sleep(2)
-    if bus is None:
-        log.error("could not register D-Bus name %s", BUS_NAME)
-        return 1
+    try:
+        candidate = SessionBus()
+        # request_name with replace=True so that, if a stale instance of
+        # this service is still holding the bus name (e.g. after an unclean
+        # shutdown), this instance takes ownership instead of raising
+        # "name already exists on the bus" and crash-looping. allow_
+        # replacement=True lets a *newer* instance take over from this
+        # one as well, so the always-newest instance wins and the daemon
+        # self-heals rather than failing.
+        candidate.request_name(BUS_NAME, allow_replacement=True, replace=True)
+        bus = candidate
+    except Exception as exc:
+        # Also covers a missing session bus (e.g. login race). Raising makes
+        # systemd see a failed start and restart us via Restart=on-failure –
+        # the transient boot window is ridden out by the init system's
+        # retry instead of a busy loop in the daemon.
+        log.warning("D-Bus name %s not (yet) available: %s", BUS_NAME, exc)
+        raise
     service = HS80Service(bus)
     bus.register_object(OBJECT_PATH, service, INTROSPECTION_XML)
 

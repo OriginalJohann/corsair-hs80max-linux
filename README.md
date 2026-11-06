@@ -43,8 +43,7 @@ status is read from the dongle over a proprietary HID protocol on
 |---|---|
 | `service/hs80max_service/` | Python daemon (`pydbus`): HID protocol I/O, connection-mode detection, D-Bus API `com.corsair.hs80max` (properties `Mode`, `Battery`, `MicMuted`, `UpdatedAt`; signal `StatusChanged`) and an atomically written `$XDG_RUNTIME_DIR/hs80max/status.json` that the extension watches. |
 | `service/hs80max.service` | systemd user unit (started at login, `Restart=on-failure`). |
-| `service/dbus/com.corsair.hs80max.conf` | D-Bus session policy allowing the user to own the bus name. |
-| `service/nixos/hs80max.nix` | NixOS module installing udev rule, D-Bus policy, user unit and extension in one option. |
+| `service/nixos/hs80max.nix` | NixOS module: udev rule, systemd user unit and the GNOME extension as a system-wide Nix package, in one option. |
 | `extension/` | GNOME Shell extension (Shell 50) — D-Bus client + top-bar UI with symbolic icons. |
 | `resources/` | Protocol research, datasheet and reference sources. |
 | `shells/dev.nix` | Nix development shell (python3, pydbus, gi, dbus, wireplumber). |
@@ -59,8 +58,7 @@ status is read from the dongle over a proprietary HID protocol on
 
 ## Deployment
 
-Two installation paths are provided — both install the same four pieces
-(udev rule, D-Bus session policy, systemd user unit, GNOME extension):
+Two installation paths are provided:
 
 ### NixOS (flake module)
 
@@ -75,11 +73,11 @@ modules = [ ... corsair-hs80max-linux.nixosModules.hs80max ];
 services.hs80max.enable = true;   # installs service AND extension
 ```
 
-Then run `nixos-rebuild switch` — the module installs the udev rule, D-Bus
-policy and user unit, copies the extension into
-`~/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev/` and
-restarts the running user service automatically. Afterwards enable the
-extension once via GNOME Settings → Extensions.
+Then run `nixos-rebuild switch` — the module installs the udev rule and the
+systemd user unit, and the GNOME extension as a system-wide Nix package (no
+D-Bus policy is needed: the default session policy already allows owning the
+bus name). The user service is restarted automatically on every switch.
+Afterwards enable the extension once via GNOME Settings → Extensions.
 
 👉 **Full guide (flakes, local testing, verification, troubleshooting):**
 [`NIXOS-SETUP.md`](./NIXOS-SETUP.md)
@@ -106,6 +104,13 @@ cat "$XDG_RUNTIME_DIR/hs80max/status.json"   # {"mode": "connected", "battery": 
 
 dbus-send --session --print-reply --dest=com.corsair.hs80max \
   /com/corsair/hs80max com.corsair.hs80max.GetStatus
+```
+
+Quick hardware check without the daemon (opens the dongle directly and
+prints battery / mic status – useful to diagnose permission or udev issues):
+
+```bash
+PYTHONPATH=service python3 -m hs80max_service.hid_protocol
 ```
 
 ## Development

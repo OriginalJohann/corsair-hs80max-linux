@@ -33,6 +33,8 @@ from hs80max_service import hid_protocol  # noqa: E402
 from hs80max_service.hid_protocol import (  # noqa: E402
     BATTERY_MAX,
     BATTERY_MIN,
+    FAST_READ_TIMEOUT,
+    HIDAccessError,
     HIDError,
     HIDNotFound,
     HS80HID,
@@ -53,7 +55,7 @@ def test_is_periodic_report_rejects_known_receiver_reports() -> None:
 
 
 def test_is_periodic_report_passes_genuine_responses() -> None:
-    # A valid battery report: value 1..1000 at bytes [4]/[5] (little-endian),
+    # A valid battery report: value 0..1000 at bytes [4]/[5] (little-endian),
     # on a non-periodic report ID. 500 (= 50 %) -> 0x01F4.
     battery_report = b"\x02\x00\x00\x00\xf4\x01\x00" + b"\x00" * 56
     # A paired-headset-ID reply: a value out of the 1..1000 range at [4]/[5].
@@ -84,15 +86,19 @@ def _fake_read(responses: list, reads: list | None = None):
 
     ``_flush()`` drains pending reports by calling ``_read(timeout=0.05)``
     in a loop; that must return ``None`` (drain done) so the loop terminates.
-    The actual battery query reads call ``_read()`` with no timeout and
-    receive the queued ``responses`` in order (``None`` once exhausted).
+    The actual query reads call ``_read(timeout=READ_TIMEOUT)`` and receive
+    the queued ``responses`` in order (``None`` once exhausted); the flush
+    reads (``timeout=0.05``) are distinguished by their small timeout.
     """
     def fake_read(self, timeout=None):
-        if timeout is not None:
+        if timeout is not None and timeout <= 0.1:
             # Called from _flush(): nothing pending.
             return None
+        # Mirror the real _read(): cap the timeout when _fast_read is set,
+        # so tests observe the effective (reduced) timeout.
+        effective = min(timeout, FAST_READ_TIMEOUT) if self._fast_read else timeout
         if reads is not None:
-            reads.append(timeout)
+            reads.append(effective)
         return responses.pop(0) if responses else None
 
     return fake_read
@@ -130,16 +136,53 @@ def test_battery_query_returns_none_when_all_reads_are_periodic(monkeypatch) -> 
 
 def test_battery_query_returns_none_for_out_of_range_value(monkeypatch) -> None:
     hid = HS80HID(device_path="/dev/none")
-    # 0 and 1001 are both outside the valid 1..1000 battery range.
-    _stub_hid(monkeypatch, [_battery_value_report(0)])
-    assert hid._battery_query() is None
+    # 1001 is outside the valid 0..1000 battery range.
     _stub_hid(monkeypatch, [_battery_value_report(1001)])
     assert hid._battery_query() is None
-    # Boundaries are inclusive and valid.
+    # Boundaries are inclusive and valid: 0 (drained) and 1000 (full).
+    _stub_hid(monkeypatch, [_battery_value_report(0)])
+    assert hid._battery_query() == 0
     _stub_hid(monkeypatch, [_battery_value_report(BATTERY_MIN)])
     assert hid._battery_query() == 0
     _stub_hid(monkeypatch, [_battery_value_report(BATTERY_MAX)])
     assert hid._battery_query() == 100
+
+
+def test_status_skips_mic_query_when_headset_off(monkeypatch) -> None:
+    """Off case: a failed handshake plus no battery reading must not spend
+    the mic query's read timeout – an off headset cannot answer it, so
+    ``status()`` returns ``mic=None`` without issuing the mic write.
+
+    The battery reads of the cycle must use the reduced timeout
+    (``FAST_READ_TIMEOUT``) because the failed handshake already means the
+    headset is almost certainly off.
+    """
+    hid = HS80HID(device_path="/dev/none")
+    writes: list = []
+    reads: list = []
+    monkeypatch.setattr(HS80HID, "wake_with_retries", lambda self: False)
+    _stub_hid(monkeypatch, [], reads)
+    # Record writes *after* the stub so the recorder wins.
+    monkeypatch.setattr(HS80HID, "_write", lambda self, payload: writes.append(payload))
+    assert hid.status() == (False, None, None)
+    # Only the battery query was issued (3 attempts), no mic query (0xA6).
+    assert not any(payload[-1] == 0xA6 for payload in writes)
+    assert len(writes) == 3
+    # Every query read used the reduced timeout (flush reads use 0.05).
+    assert reads, "expected battery query reads"
+    assert all(t <= FAST_READ_TIMEOUT for t in reads)
+
+
+def test_status_uses_full_timeout_when_handshake_succeeds(monkeypatch) -> None:
+    """A successful handshake must not enable the reduced read timeout."""
+    hid = HS80HID(device_path="/dev/none")
+    reads: list = []
+    monkeypatch.setattr(HS80HID, "wake_with_retries", lambda self: True)
+    _stub_hid(monkeypatch, [_battery_value_report(800)], reads)
+    assert hid.status() == (True, 80, None)  # mic query gets no reply
+    assert hid._fast_read is False
+    # The battery query read used the full timeout (not the reduced one).
+    assert any(t > FAST_READ_TIMEOUT for t in reads)
 
 
 # ---------------------------------------------------------------------------
@@ -256,14 +299,69 @@ def test_find_control_hidraw_skips_malformed_entries(monkeypatch, tmp_path) -> N
 
 
 # ---------------------------------------------------------------------------
+# connection.dongle_present (fake sysfs)
+# ---------------------------------------------------------------------------
+
+def _make_usb_device(base: Path, name: str, vendor: str, product: str) -> None:
+    """Create a fake ``/sys/bus/usb/devices/<name>`` entry."""
+    dev = base / name
+    dev.mkdir(parents=True)
+    (dev / "idVendor").write_text(vendor + "\n")
+    (dev / "idProduct").write_text(product + "\n")
+
+
+def test_dongle_present_finds_matching_device(tmp_path, monkeypatch) -> None:
+    """The dongle is detected by vendor/product id among other devices."""
+    from hs80max_service import connection
+
+    _make_usb_device(tmp_path, "1-0", "1d6b", "0002")  # root hub
+    _make_usb_device(tmp_path, "1-1", "046d", "c52b")  # some other dongle
+    _make_usb_device(tmp_path, "1-2", "1b1c", "0a97")  # the HS80 MAX dongle
+    monkeypatch.setattr(connection, "USB_DEVICES_DIR", str(tmp_path))
+
+    assert connection.dongle_present() is True
+
+
+def test_dongle_present_absent_when_no_match(tmp_path, monkeypatch) -> None:
+    from hs80max_service import connection
+
+    _make_usb_device(tmp_path, "1-0", "1d6b", "0002")
+    _make_usb_device(tmp_path, "1-1", "046d", "c52b")
+    monkeypatch.setattr(connection, "USB_DEVICES_DIR", str(tmp_path))
+
+    assert connection.dongle_present() is False
+
+
+def test_dongle_present_skips_unreadable_entries(tmp_path, monkeypatch) -> None:
+    """A directory without id files (e.g. a bus entry) must not abort the
+    scan; a matching device later in the listing is still found."""
+    from hs80max_service import connection
+
+    (tmp_path / "usb1").mkdir()  # no idVendor / idProduct
+    _make_usb_device(tmp_path, "1-2", "1b1c", "0a97")
+    monkeypatch.setattr(connection, "USB_DEVICES_DIR", str(tmp_path))
+
+    assert connection.dongle_present() is True
+
+
+def test_dongle_present_false_when_no_devices(tmp_path, monkeypatch) -> None:
+    """An empty device listing (dongle unplugged) reports absent."""
+    from hs80max_service import connection
+
+    monkeypatch.setattr(connection, "USB_DEVICES_DIR", str(tmp_path))
+
+    assert connection.dongle_present() is False
+
+
+# ---------------------------------------------------------------------------
 # Poller sticky rules
 # ---------------------------------------------------------------------------
 
 def _make_poller(monkeypatch, hid_error: Exception | None = None) -> object:
     """Build a :class:`Poller` with the D-Bus service and HID layer faked.
 
-    ``connection.connection_mode`` is forced to ``"connected"`` (dongle
-    plugged in) and :meth:`HS80HID.open` is faked to raise ``hid_error``
+    ``connection.dongle_present`` is forced to ``True`` (dongle plugged in)
+    and :meth:`HS80HID.open` is faked to raise ``hid_error``
     (or succeed with a no-op double when ``hid_error`` is ``None``).
     """
     from hs80max_service import connection
@@ -273,7 +371,7 @@ def _make_poller(monkeypatch, hid_error: Exception | None = None) -> object:
     published: list = []
     service.publish = lambda status: published.append(status)
 
-    monkeypatch.setattr(connection, "connection_mode", lambda: "connected")
+    monkeypatch.setattr(connection, "dongle_present", lambda: True)
 
     def fake_open(self) -> None:
         if hid_error is not None:
@@ -298,8 +396,8 @@ def test_poller_dongle_unplugged_resets_battery_and_mic(monkeypatch) -> None:
     published: list = []
     service.publish = lambda status: published.append(status)
 
-    # Dongle unplugged -> connection_mode() reports "disconnected".
-    monkeypatch.setattr(connection, "connection_mode", lambda: "disconnected")
+    # Dongle unplugged -> dongle_present() reports absent.
+    monkeypatch.setattr(connection, "dongle_present", lambda: False)
 
     poller = Poller(service)
     # Simulate previously known values.
@@ -345,9 +443,27 @@ def test_poller_hid_not_found_does_not_flip_mode_to_off(monkeypatch) -> None:
     assert poller._published[-1].mode == "connected"
 
 
+def test_poller_hid_access_error_does_not_flip_mode_to_off(monkeypatch) -> None:
+    """A PermissionError on the dongle (e.g. missing group membership after
+    a fresh install) is not a power state: the Poller keeps the last known
+    headset power state and must NOT conclude the headset is off."""
+    poller = _make_poller(monkeypatch, hid_error=HIDAccessError("no permission"))
+    poller._headset_on = True
+    poller._battery = 80
+    poller._mic_muted = False
+
+    poller._poll_once()
+
+    assert poller._mode == "connected"
+    assert poller._headset_on is True
+    assert poller._battery == 80
+    assert poller._mic_muted is False
+    assert poller._published[-1].mode == "connected"
+
+
 def test_poller_other_hid_error_sets_mode_to_off(monkeypatch) -> None:
-    """A *non*-not-found HIDError (e.g. permission / open failure) is a real
-    unreachable channel and must set the mode to "off"."""
+    """A generic HIDError (a real unreachable channel, neither not-found nor
+    a permission problem) must set the mode to "off"."""
     poller = _make_poller(monkeypatch, hid_error=HIDError("cannot open /dev/hidraw1"))
     poller._headset_on = True
     poller._battery = 80

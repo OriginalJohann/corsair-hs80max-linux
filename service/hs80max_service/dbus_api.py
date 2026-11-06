@@ -164,12 +164,7 @@ class HS80Service:
                 self._status = status
             else:
                 # Keep the timestamp fresh even without value changes.
-                self._status = Status(
-                    mode=self._status.mode,
-                    battery=self._status.battery,
-                    mic_muted=self._status.mic_muted,
-                    updated_at=status.updated_at,
-                )
+                self._status.updated_at = status.updated_at
         if changed:
             # Emit the D-Bus signal directly from the Poller thread.
             # pydbus's DbusSignal.__call__ -> g_dbus_connection_send_message

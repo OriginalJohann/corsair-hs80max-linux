@@ -9,28 +9,37 @@ components:
 | **Service** (`hs80max.service`, systemd user unit) | Python daemon: reads the HS80 Max battery level, connection mode (dongle vs. USB-C) and microphone state via the HID protocol and exposes them over the D-Bus session (`com.corsair.hs80max`). |
 | **GNOME Extension** (`hs80max@originaljohann.dev`) | Shows two icons (connection, microphone) plus the battery percentage in the GNOME top bar; clicking opens details and `pavucontrol`. |
 
-The module creates:
+The module (`service/nixos/hs80max.nix`) creates:
 
 1. **udev rule** – grants the `users` group read/write access to the hidraw
    node of the HS80 Max dongle (`1b1c:0a97`) so the daemon can access it as a
    regular user.
-2. **D-Bus session policy** – allows the user to own the bus name
-   `com.corsair.hs80max`
-   (copied to `/run/dbus/session.conf.d/`).
-3. **systemd user unit** – starts the daemon at login
-   (`After=graphical-session.target`, `WantedBy=default.target`,
-   `Restart=on-failure`) and **restarts it automatically on every
-   `nixos-rebuild switch`** (NixOS does not restart user services otherwise).
-4. **GNOME extension** – copies the extension files into
-   `~/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev/` of the
-   configured user.
+2. **systemd user unit** – starts the daemon at login
+   (`After=graphical-session.target dbus.socket`, `WantedBy=default.target`,
+   `Restart=on-failure`, `RestartSec=5`). Transient boot conditions (e.g. the
+   session bus not being ready yet) are ridden out by systemd's retry; the
+   daemon exits non-zero on a failed start. NixOS restarts the user service
+   automatically on every `nixos-rebuild switch`.
+3. **GNOME extension** – built as a Nix package and installed system-wide via
+   `environment.systemPackages`, so GNOME Shell discovers it in
+   `/run/current-system/sw/share/gnome-shell/extensions/` without any
+   activation script.
+
+No D-Bus policy file is needed: the default session bus policy already allows
+owning the `com.corsair.hs80max` name.
 
 ---
 
 ## 1. Prerequisites
 
 - NixOS with the **flake workflow** enabled (`nix.settings.experimental-features = [ "nix-command" "flakes" ];`).
-- GNOME desktop (the extension requires GNOME Shell 50, e.g. NixOS 25.05).
+- GNOME desktop with **GNOME Shell 50** (e.g. NixOS 25.05) for the extension.
+- Your user is a member of the **`users`** group (the udev rule grants the
+  `users` group access to the dongle's hidraw node):
+  ```bash
+  sudo usermod -aG users $USER
+  # log out and back in (or `newgrp users`)
+  ```
 - The HS80 Max dongle must be connected for the udev rule to take effect
   (without the dongle the service still starts and reports `disconnected`).
 
@@ -66,7 +75,9 @@ In your NixOS host flake (`flake.nix` on the machine):
 > path:
 > `corsair-hs80max-linux = { url = "/Data/ai/corsair-hs80max-linux"; };`
 > The project flake works identically locally (it exposes
-> `nixosModules.hs80max`).
+> `nixosModules.hs80max`). The flake has no own inputs – the module's
+> `pkgs` come from your host flake, so the build always tracks your
+> nixpkgs.
 
 ## 3. Set the option in your NixOS configuration
 
@@ -76,13 +87,10 @@ In your `configuration.nix` (or wherever your host options live):
 {
   # Installs the service AND the GNOME extension:
   services.hs80max.enable = true;
-
-  # Optional (default: "fne"): the home into which the extension is copied.
-  # The user must be defined in users.users; the target folder is resolved
-  # from the user's `home` attribute (also works with NixOS store homes).
-  # services.hs80max.user = "fne";
 }
 ```
+
+That is the only option the module provides.
 
 ## 4. Apply
 
@@ -90,16 +98,12 @@ In your `configuration.nix` (or wherever your host options live):
 nixos-rebuild switch
 ```
 
-That's it. The activation run:
-
-- installs/updates the udev rule, the D-Bus policy, and the user unit,
-- copies the extension into `~/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev/`,
-- **restarts** the running `hs80max` user service automatically
-  (stop + start, only if a user session is running).
+Then **log out and back in** (the systemd *user* unit starts at login, and
+GNOME Shell must be restarted to pick up the new system extension).
 ## 5. Enable the extension once
 
-The copy only installs the files – **enabling** the extension is left to your
-`dconf` setting and survives rebuilds. One time only:
+Installation only puts the files in place – **enabling** the extension is a
+per-user `dconf` setting and survives rebuilds. One time only:
 
 - toggle **GNOME Settings → Extensions → “Corsair HS80 Max Status”** on, **or**
 - `gsettings set org.gnome.shell enabled-extensions "['hs80max@originaljohann.dev']"`
@@ -126,8 +130,8 @@ cat "$XDG_RUNTIME_DIR/hs80max/status.json"
 dbus-send --session --print-reply --dest=com.corsair.hs80max \
   /com/corsair/hs80max com.corsair.hs80max.GetStatus
 
-# Was the extension copied?
-ls ~/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev/
+# Is the extension installed system-wide?
+ls /run/current-system/sw/share/gnome-shell/extensions/ | grep hs80max
 ```
 
 ## 7. Updating the project
@@ -135,7 +139,7 @@ ls ~/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev/
 ```bash
 # On the host:
 nix flake update corsair-hs80max-linux
-nixos-rebuild switch     # the service is restarted automatically
+nixos-rebuild switch     # the user service is restarted automatically
 ```
 
 Afterwards, reload the shell (Alt+F2 → `r`) if the extension changed.
@@ -145,10 +149,9 @@ Afterwards, reload the shell (Alt+F2 → `r`) if the extension changed.
 | Symptom | Cause / remedy |
 |---|---|
 | Service starts, reports `disconnected` permanently | Dongle not detected? Check `ls /sys/class/hidraw/hidraw*/device`; the udev rule only takes effect after reconnecting the dongle or `sudo udevadm control --reload-rules && sudo udevadm trigger`. |
-| `systemctl --user status hs80max` shows an old store path | Normal only briefly after `switch`, before the activation script has finished; afterwards the path must be current. |
-| Extension does not appear in GNOME settings | Is the folder `~/.local/share/gnome-shell/extensions/hs80max@originaljohann.dev/` present? `metadata.json` must cover your GNOME with `shell-version: ["50"]`. |
+| `hs80max.service` not running | `journalctl --user -u hs80max` – check for permission errors; make sure your user is in the `users` group and you logged in again. |
+| Extension does not appear in GNOME settings | Is the folder `/run/current-system/sw/share/gnome-shell/extensions/hs80max@originaljohann.dev/` present? `metadata.json` must cover your GNOME with `shell-version: ["50"]`. |
 | Extension shows “disconnected”, but the service is running | The extension runs as a **user** – it only sees the session D-Bus of that same user. `status.json` (point 6) shows whether the daemon delivers status at all. |
-| `cp: cannot create … $extDir` in the activation log | `users.users.<user>` not defined → set `services.hs80max.user` and create the user in `users.users`. |
 
 ## 9. Alternatives (short form)
 
@@ -158,6 +161,8 @@ Afterwards, reload the shell (Alt+F2 → `r`) if the extension changed.
   plain evaluation mode).
 - **Service only, without the extension:** not provided – `services.hs80max.enable`
   installs both.
+- **Non-NixOS systems:** `./install.sh` (installs udev rule, D-Bus policy,
+  systemd user unit and the extension into `~/.local/share/`).
 - **Manually (without the NixOS module):** copy `service/hs80max.service`
   to `~/.config/systemd/user/` and the extension folder manually to
   `~/.local/share/gnome-shell/extensions/` – this only serves as a fallback

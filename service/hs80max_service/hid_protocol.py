@@ -35,13 +35,21 @@ HEADSET_ENDPOINT = 0x09
 MSG_SIZE_READ = 64
 MSG_SIZE_WRITE = 65  # report ID (0x00) + 64 payload bytes
 
-# Battery response range: 1..1000 (0.1 % resolution).
-BATTERY_MIN = 1
+# Battery response range: 0..1000 (0.1 % resolution). 0 is a valid reading:
+# a fully drained headset answers 0 and must show as 0 %, not as "no
+# reading" (which would keep the last known value on screen forever).
+BATTERY_MIN = 0
 BATTERY_MAX = 1000
 BATTERY_MAX_ATTEMPTS = 3
 
 # Read timeout for IN reports (seconds).
 READ_TIMEOUT = 5.0
+
+# Reduced read timeout (seconds) used for the battery/mic queries once the
+# shared wake handshake of a cycle has already failed: the headset is almost
+# certainly off, so each query only needs a short window before giving up.
+# This cuts the worst-case cycle time from ~40 s to ~21 s.
+FAST_READ_TIMEOUT = 2.0
 
 # ``wake()`` is retried this many times (with a short pause between attempts)
 # before giving up.  The headset only answers the control channel shortly
@@ -70,7 +78,7 @@ def _is_periodic_report(report: bytes) -> bool:
       product ID ``0x0a97`` (little-endian)
 
     A genuine headset response to our queries is one of: a battery value
-    in ``1..1000`` at bytes [4]/[5], the mic flag at byte [4], or the
+    in ``0..1000`` at bytes [4]/[5], the mic flag at byte [4], or the
     headset heartbeat reply.  None of these match the patterns above,
     so this check is a safe first-stage filter before value validation.
     """
@@ -84,6 +92,18 @@ def _is_periodic_report(report: bytes) -> bool:
 
 class HIDError(Exception):
     """Raised when the HID device cannot be opened or communicated with."""
+
+
+class HIDAccessError(HIDError):
+    """Raised when the device node exists but cannot be opened (permissions).
+
+    Distinct from a generic :class:`HIDError`: the channel is present but the
+    user lacks access (e.g. not a member of the ``users`` group after a
+    fresh install).  The Poller must treat this like a transient
+    ``HIDNotFound`` – keeping the last known power state – because the
+    headset may well be on and the permission problem is fixable without
+    touching the headset.
+    """
 
 
 class HIDNotFound(HIDError):
@@ -139,14 +159,19 @@ class HS80HID:
     def __init__(self, device_path: str | None = None):
         self.device_path = device_path or find_control_hidraw()
         self._fd: int | None = None
+        # Set by status() after a failed wake handshake: subsequent reads in
+        # this cycle use FAST_READ_TIMEOUT instead of the full READ_TIMEOUT.
+        self._fast_read = False
 
     # ------------------------------------------------------------------ open
     def open(self) -> None:
         """Open the hidraw device node (read/write).
 
         Raises :class:`HIDNotFound` when the device node does not exist yet
-        (e.g. right after a dongle replug, before udev has created it) and a
-        generic :class:`HIDError` for any other open failure.
+        (e.g. right after a dongle replug, before udev has created it),
+        :class:`HIDAccessError` when the node exists but the user lacks
+        permission, and a generic :class:`HIDError` for any other open
+        failure.
         """
         if self._fd is not None:
             return
@@ -155,7 +180,7 @@ class HS80HID:
         try:
             self._fd = os.open(self.device_path, os.O_RDWR | os.O_NONBLOCK)
         except PermissionError as exc:
-            raise HIDError(
+            raise HIDAccessError(
                 f"no permission on {self.device_path} – add the udev rule "
                 f"(see resources/battery-protocol.md, 'Permissions')"
             ) from exc
@@ -193,7 +218,11 @@ class HS80HID:
         """
         if self._fd is None:
             raise HIDError("device not open")
-        deadline = time.monotonic() + timeout
+        # A failed wake handshake of this cycle means the headset is almost
+        # certainly off: cap the read timeout so the remaining queries give
+        # up quickly instead of burning the full READ_TIMEOUT each.
+        effective = min(timeout, FAST_READ_TIMEOUT) if self._fast_read else timeout
+        deadline = time.monotonic() + effective
         buf = b""
         while len(buf) < MSG_SIZE_READ and time.monotonic() < deadline:
             try:
@@ -275,14 +304,16 @@ class HS80HID:
 
         Responses are validated twice: the known periodic receiver report
         patterns are rejected outright (they are not battery responses),
-        and the battery value must fall in ``1..1000`` (the reference
+        and the battery value must fall in ``0..1000`` (the reference
         implementation's primary check, which also handles the
         paired-headset-ID reply).
         """
         self._flush()
         for _ in range(BATTERY_MAX_ATTEMPTS):
             self._write(bytes([0x00, 0x02, HEADSET_ENDPOINT, 0x02, 0x0F]))
-            resp = self._read()
+            # Explicit timeout so _read() applies the reduced timeout when
+            # _fast_read is set (see status()).
+            resp = self._read(timeout=READ_TIMEOUT)
             if resp is None:
                 continue
             if _is_periodic_report(resp):
@@ -311,7 +342,7 @@ class HS80HID:
         """
         self._flush()
         self._write(bytes([0x00, 0x02, HEADSET_ENDPOINT, 0x02, 0xA6]))
-        resp = self._read()
+        resp = self._read(timeout=READ_TIMEOUT)
         if resp is None or _is_periodic_report(resp):
             return None
         return resp[4] == 0x01
@@ -324,7 +355,7 @@ class HS80HID:
         prior shared wake would burn its full read timeout.
 
         Returns ``(headset_on, battery, mic)``.  The battery query decides
-        "on": a fresh reading in 1..1000 can only come from an awake
+        "on": a fresh reading in 0..1000 can only come from an awake
         headset, so it always wins.  The handshake heartbeat is only a
         fallback for that – it is not reliable on its own, because the
         headset answers the control channel only shortly after it wakes
@@ -332,12 +363,23 @@ class HS80HID:
         only), so a steady-on headset frequently misses the heartbeat
         window.  (Off case: handshake fails *and* the battery query times
         out → ``False, None, None`` as before.)
+
+        When the handshake fails, the mic query is skipped: an off headset
+        cannot answer it, so it would only burn its full read timeout and
+        add nothing.  The battery query still runs with a reduced read
+        timeout (``FAST_READ_TIMEOUT``) as a fallback power signal.
         """
         on = self.wake_with_retries()
+        # A failed handshake means the headset is almost certainly off: the
+        # battery/mic reads of this cycle use the reduced timeout so the
+        # cycle does not burn the full read timeout per query.
+        self._fast_read = not on
         battery = self._battery_query()
-        mic = self._mic_query()
         if battery is not None:
             on = True
+        # A failed handshake plus no battery reading means the headset is
+        # off – the mic query would only time out, so leave it as None.
+        mic = self._mic_query() if on else None
         return on, battery, mic
 
 

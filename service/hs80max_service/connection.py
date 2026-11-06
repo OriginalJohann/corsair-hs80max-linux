@@ -44,8 +44,3 @@ def dongle_present() -> bool:
         if vid.lower() == DONGLE_VENDOR and pid.lower() == DONGLE_PRODUCT:
             return True
     return False
-
-
-def connection_mode() -> str:
-    """Return ``connected`` when the dongle is present, else ``disconnected``."""
-    return "connected" if dongle_present() else "disconnected"
