@@ -131,15 +131,15 @@ Bereits boot-sicher (wird von `udev` beim Start geladen).
 - [x] Alle drei `activationScripts`-Blöcke entfernen
 - [x] `systemd.user.services.hs80max` reaktivieren
 - [x] `cfg.user`-Option entfernen
-- [ ] `nixos-rebuild switch` + Reboot-Test
-- [ ] Extension-Prüfung: `ls /run/current-system/sw/share/gnome-shell/extensions/`
-- [ ] Service-Prüfung: `systemctl --user status hs80max`
+- [x] `nixos-rebuild switch` + Reboot-Test
+- [x] Extension-Prüfung: `ls /run/current-system/sw/share/gnome-shell/extensions/`
+- [x] Service-Prüfung: `systemctl --user status hs80max`
 
 ## Status
 
 - [x] Bisection: Boot-Fehler auf `hs80max-restart`-Skript isoliert
 - [x] Nixpkgs-Referenz analysiert
-- [ ] Revamp implementiert
-- [ ] Boot-Test bestanden
-- [ ] Extension-Test bestanden
-- [ ] Service-Test bestanden
+- [x] Revamp implementiert
+- [x] Boot-Test bestanden
+- [x] Extension-Test bestanden
+- [x] Service-Test bestanden
