@@ -6,7 +6,6 @@ Exposes ``com.corsair.hs80max`` on the session bus with:
   ``Battery`` (i, -1 = unavailable),
   ``MicMuted`` (b), ``UpdatedAt`` (t, epoch ms)
 * Methods:    ``GetStatus() -> a{sv}``
-* Signal:     ``StatusChanged(mode: s, battery: i, mic_muted: b)``
 
 Built on ``pydbus`` (available in ``shells/dev.nix``).
 """
@@ -20,7 +19,6 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from pydbus.generic import signal as _dbus_signal
 from gi.repository import GLib
 
 log = logging.getLogger("hs80max.dbus")
@@ -30,7 +28,7 @@ OBJECT_PATH = "/com/corsair/hs80max"
 INTERFACE = "com.corsair.hs80max"
 
 # D-Bus introspection XML (parsed by pydbus via Gio.DBusNodeInfo).
-# Defines methods, readable properties and the StatusChanged signal.
+# Defines methods and readable properties.
 INTROSPECTION_XML = """
 <node>
   <interface name="com.corsair.hs80max">
@@ -41,11 +39,6 @@ INTROSPECTION_XML = """
     <property name="Battery" type="i" access="read"/>
     <property name="MicMuted" type="b" access="read"/>
     <property name="UpdatedAt" type="t" access="read"/>
-    <signal name="StatusChanged">
-      <arg name="mode" type="s"/>
-      <arg name="battery" type="i"/>
-      <arg name="mic_muted" type="b"/>
-    </signal>
   </interface>
 </node>
 """
@@ -91,11 +84,6 @@ class HS80Service:
     def UpdatedAt(self) -> int:
         with self._lock:
             return int(self._status.updated_at * 1000)
-
-    # -------------------------------------------------------------- signals
-    # pydbus emits the D-Bus signal when this attribute is called
-    # (ObjectWrapper wires it to the connection).
-    StatusChanged = _dbus_signal()
 
     def GetStatus(self) -> dict:
         """Return status as ``a{sv}``.
@@ -145,9 +133,11 @@ class HS80Service:
 
     # -------------------------------------------------------------- update
     def publish(self, status: Status) -> bool:
-        """Store a new status; emit StatusChanged only on changes.
+        """Store a new status; rewrite the status file on changes.
 
-        Returns True when the status changed.
+        The status file is the extension's data path (this GJS build drops
+        D-Bus signal delivery), so it is (re)written atomically on every
+        change. Returns True when the status changed.
         """
         changed = False
         with self._lock:
@@ -166,17 +156,5 @@ class HS80Service:
                 # Keep the timestamp fresh even without value changes.
                 self._status.updated_at = status.updated_at
         if changed:
-            # Emit the D-Bus signal directly from the Poller thread.
-            # pydbus's DbusSignal.__call__ -> g_dbus_connection_send_message
-            # is thread-safe per the GLib docs, so no dispatch to the main
-            # loop is needed.  (GLib.idle_add from a non-main thread is
-            # undefined behaviour and silently drops the source – the
-            # original bug that caused the extension icon to go stale.)
-            # Done outside the lock so no D-Bus I/O happens under it.
-            self.StatusChanged(
-                status.mode, status.battery, status.mic_muted,
-            )
-            # Also update the status file so the extension's GFile monitor
-            # fires (D-Bus signals are not delivered by this GJS build).
             self._write_status_file()
         return changed

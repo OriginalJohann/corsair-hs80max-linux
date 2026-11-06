@@ -26,16 +26,17 @@ corsair-hs80max-linux/
 │   │   ├── main.py            # Daemon entry point + Poller (orchestration, sticky state)
 │   │   ├── hid_protocol.py    # HID I/O (open/read/write) + wake/battery/mic commands
 │   │   ├── connection.py      # Connection-mode detection (dongle vs. USB-C)
-│   │   └── dbus_api.py        # D-Bus interface com.corsair.hs80max
+│   │   └── dbus_api.py        # D-Bus interface com.corsair.hs80max + status file
 │   ├── nixos/
 │   │   └── hs80max.nix        # NixOS module (udev + user service + GNOME extension)
 │   ├── hs80max.service        # systemd user unit (single source for both install paths)
 │   ├── test_dbus.sh           # E2E D-Bus test script
-│   ├── test_dbus_signal.py    # D-Bus signal test (no hardware)
+│   ├── test_dbus_signal.py    # Status-file & thread-safety tests (no hardware)
 │   └── test_hid_protocol.py   # Pytest unit tests (HID protocol, no hardware)
 ├── extension/                 # GNOME Shell extension (Shell 50) – Phase 2
 │   ├── metadata.json
-│   ├── extension.js           # D-Bus client (com.corsair.hs80max) + tray UI
+│   ├── extension.js           # D-Bus client (com.corsair.hs80max) + status-file
+│   │                          # monitor (live updates) + tray UI
 │   │                          # (PanelMenu.Button via Main.panel.addToStatusArea,
 │   │                          #  left box, like the appindicator extension)
 │   ├── stylesheet.css
@@ -52,5 +53,6 @@ corsair-hs80max-linux/
 - Dongle: USB `1b1c:0a97`, HID control on **interface 4** → `/dev/hidraw1`
 - Battery: proprietary HID protocol (see `resources/battery-protocol.md`), no USB Battery SUD
 - D-Bus service name: `com.corsair.hs80max` (session bus)
+- Status file: `$XDG_RUNTIME_DIR/hs80max/status.json` (live data path for the extension)
 - Volume app: `pavucontrol`
 - Extension UUID: `hs80max@originaljohann.dev`

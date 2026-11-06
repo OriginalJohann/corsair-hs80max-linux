@@ -41,7 +41,7 @@ status is read from the dongle over a proprietary HID protocol on
 
 | Component | Role |
 |---|---|
-| `service/hs80max_service/` | Python daemon (`pydbus`): HID protocol I/O, connection-mode detection, D-Bus API `com.corsair.hs80max` (properties `Mode`, `Battery`, `MicMuted`, `UpdatedAt`; signal `StatusChanged`) and an atomically written `$XDG_RUNTIME_DIR/hs80max/status.json` that the extension watches. |
+| `service/hs80max_service/` | Python daemon (`pydbus`): HID protocol I/O, connection-mode detection, D-Bus API `com.corsair.hs80max` (properties `Mode`, `Battery`, `MicMuted`, `UpdatedAt`) and an atomically written `$XDG_RUNTIME_DIR/hs80max/status.json` that the extension watches. |
 | `service/hs80max.service` | systemd user unit (started at login, `Restart=on-failure`). |
 | `service/nixos/hs80max.nix` | NixOS module: udev rule, systemd user unit and the GNOME extension as a system-wide Nix package, in one option. |
 | `extension/` | GNOME Shell extension (Shell 50) — D-Bus client + top-bar UI with symbolic icons. |

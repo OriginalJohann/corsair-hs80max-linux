@@ -2,6 +2,8 @@ produktblatt*
 scratchpad/*
 __pycache__/
 *.pyc
+.venv/
+.pytest_cache/
 .vscode/
 tmp*
 .agents/*

@@ -10,7 +10,6 @@
 // Status data is read from the hs80max-service daemon over the *session*
 // D-Bus (name `com.corsair.hs80max`, object `/com/corsair/hs80max`):
 //   * `GetStatus() -> a{sv}` carrying {Mode, Battery, MicMuted, UpdatedAt}
-//   * signal `StatusChanged(mode: s, battery: i, mic_muted: b)`
 //
 // Refresh strategy:
 //   1. one initial `GetStatus` read on enable,

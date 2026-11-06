@@ -477,6 +477,29 @@ def test_poller_other_hid_error_sets_mode_to_off(monkeypatch) -> None:
     assert poller._published[-1].mode == "off"
 
 
+def test_poller_recovers_from_off_to_connected(monkeypatch) -> None:
+    """The everyday path: headset switched on -> mode connected, values set.
+
+    The "off" directions are tested above; this pins the recovery
+    transition, where a stale "off" icon with unknown battery would be the
+    visible symptom of a regression.
+    """
+    poller = _make_poller(monkeypatch)
+    # Simulate the previously known state: headset off.
+    poller._headset_on = False
+    poller._mode = "off"
+
+    # open() succeeds and status() reports (True, 80, True) (see helper).
+    poller._poll_once()
+
+    assert poller._mode == "connected"
+    assert poller._headset_on is True
+    assert poller._battery == 80
+    assert poller._mic_muted is True
+    assert poller._published[-1].mode == "connected"
+    assert poller._published[-1].battery == 80
+
+
 if __name__ == "__main__":
     # Allow running without pytest (mirrors test_dbus_signal.py).
     import pytest  # type: ignore[import-not-found]

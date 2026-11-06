@@ -15,9 +15,13 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UUID="hs80max@originaljohann.dev"
 
-# Use sudo only when not already root, so the script also works as root.
-SUDO="$(command -v sudo || echo true)"
-[ "$(id -u)" -eq 0 ] && SUDO=true
+# No privilege prefix when already root: a `true` prefix would silently
+# no-op every privileged command (the udev rule would never be written).
+if [ "$(id -u)" -eq 0 ]; then
+  SUDO=""
+else
+  SUDO="$(command -v sudo || { echo "sudo not found" >&2; exit 1; })"
+fi
 
 echo "==> 1/5 Checking dependencies"
 command -v python3 >/dev/null || { echo "python3 not found" >&2; exit 1; }
