@@ -25,7 +25,9 @@ SOCK="$WORKDIR/bus.sock"
 CONF="$WORKDIR/dbus.conf"
 LOG="$WORKDIR/service.log"
 cleanup() {
-  pkill -f "hs80max_service.main" 2>/dev/null || true
+  # Only kill the daemon we started ourselves ($SPID) – a pkill by process
+  # name would also terminate the user's real, running hs80max daemon.
+  kill "$SPID" 2>/dev/null || true
   rm -rf "$WORKDIR"
 }
 trap cleanup EXIT

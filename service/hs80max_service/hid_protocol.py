@@ -45,6 +45,10 @@ BATTERY_MAX_ATTEMPTS = 3
 # Read timeout for IN reports (seconds).
 READ_TIMEOUT = 5.0
 
+# Write timeout for OUT reports (seconds). A device that stops consuming
+# (driver glitch, wedged dongle) must not block the caller forever.
+WRITE_TIMEOUT = 5.0
+
 # Reduced read timeout (seconds) used for the battery/mic queries once the
 # shared wake handshake of a cycle has already failed: the headset is almost
 # certainly off, so each query only needs a short window before giving up.
@@ -199,16 +203,25 @@ class HS80HID:
 
         ``payload`` must already include the report ID as its first byte.
         It is zero-padded to ``MSG_SIZE_WRITE`` (65) bytes.
+
+        Blocks until the device accepts the report. A device that stops
+        consuming (driver glitch, wedged dongle) must not block the caller
+        forever, so the write gives up after ``WRITE_TIMEOUT`` seconds and
+        raises ``HIDError`` – the poller treats that like any failed cycle.
         """
         if self._fd is None:
             raise HIDError("device not open")
         data = payload.ljust(MSG_SIZE_WRITE, b"\x00")
         written = 0
+        deadline = time.monotonic() + WRITE_TIMEOUT
         while written < len(data):
             try:
                 written += os.write(self._fd, data[written:])
             except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise HIDError(f"write to {self.device_path} timed out")
                 time.sleep(0.005)
+
     def _read(self, timeout: float = READ_TIMEOUT) -> bytes | None:
         """Read one 64-byte IN report; ``None`` on timeout.
 
@@ -324,15 +337,6 @@ class HS80HID:
                 return raw // 10
             # Receiver replied with a paired-headset ID – retry.
         return None
-
-    def mic_muted(self) -> bool | None:
-        """Query microphone mute state (boom mic flipped up).
-
-        Returns ``True``/``False`` on success, ``None`` when unreachable.
-        """
-        if not self.wake():
-            return None
-        return self._mic_query()
 
     def _mic_query(self) -> bool | None:
         """Mic query; assumes the channel is already woken up.

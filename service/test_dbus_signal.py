@@ -72,6 +72,40 @@ def test_publish_writes_status_file_with_current_values(tmp_path, monkeypatch) -
     assert os.path.getmtime(path) == before
 
 
+def test_publish_refreshes_stale_status_file(tmp_path, monkeypatch) -> None:
+    """The status file must be rewritten once it goes stale, even when the
+    status values never change again (e.g. a permanently disconnected
+    dongle).
+
+    Without this, the file's mtime and the "updated_at" shown in the
+    extension's menu would age without bound while the daemon is healthy.
+    ``updated_at`` in the file must stay the time of the last *real*
+    status change – only the file itself gets refreshed.
+    """
+    import json
+    import os
+
+    from hs80max_service import dbus_api
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    svc = _make_service()
+    svc.publish(Status(mode="connected", battery=73, mic_muted=False))
+
+    path = tmp_path / "hs80max" / "status.json"
+    first = json.loads(path.read_text(encoding="utf-8"))
+    before = os.path.getmtime(path)
+
+    # Force the file to look older than STATUS_FILE_REFRESH_S.
+    svc._last_file_write = time.monotonic() - dbus_api.STATUS_FILE_REFRESH_S - 1
+    svc.publish(Status(mode="connected", battery=73, mic_muted=False))
+
+    # The file was rewritten (mtime advanced) …
+    assert os.path.getmtime(path) > before
+    # … but "updated_at" still reflects the last real status change.
+    second = json.loads(path.read_text(encoding="utf-8"))
+    assert second["updated_at"] == first["updated_at"]
+
+
 def test_publish_and_property_read_from_threads_do_not_raise() -> None:
     """Concurrent publish() and property reads must not raise.
 

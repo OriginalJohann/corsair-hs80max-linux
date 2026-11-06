@@ -27,6 +27,13 @@ BUS_NAME = "com.corsair.hs80max"
 OBJECT_PATH = "/com/corsair/hs80max"
 INTERFACE = "com.corsair.hs80max"
 
+# Rewrite the status file at most once per this many seconds, even when the
+# status values did not change. The file's mtime is the liveness signal:
+# without this, a permanently disconnected dongle (values never change
+# again) would leave the file stale forever and "updated_at" in it would
+# age without bound while the daemon is perfectly healthy.
+STATUS_FILE_REFRESH_S = 60.0
+
 # D-Bus introspection XML (parsed by pydbus via Gio.DBusNodeInfo).
 # Defines methods and readable properties.
 INTROSPECTION_XML = """
@@ -63,6 +70,9 @@ class HS80Service:
         # Guards _status: publish() runs on the Poller thread while D-Bus
         # method/property handlers run on the GLib main-loop thread.
         self._lock = threading.Lock()
+        # Last time the status file was (re)written (monotonic); used to
+        # keep the file fresh even when the values stop changing.
+        self._last_file_write = 0.0
 
     # ---------------------------------------------------------- properties
     @property
@@ -113,16 +123,20 @@ class HS80Service:
         )
         return os.path.join(runtime, "hs80max", "status.json")
 
-    def _write_status_file(self) -> None:
+    def _write_status_file(self, status: Status | None = None) -> None:
         path = self._status_file_path
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with self._lock:
+                # ``status`` is the snapshot the caller already took under
+                # the lock; defaulting to the current one keeps this safe
+                # when called directly.
+                snapshot = status if status is not None else self._status
                 payload = {
-                    "mode": self._status.mode,
-                    "battery": self._status.battery,
-                    "mic_muted": self._status.mic_muted,
-                    "updated_at": int(self._status.updated_at * 1000),
+                    "mode": snapshot.mode,
+                    "battery": snapshot.battery,
+                    "mic_muted": snapshot.mic_muted,
+                    "updated_at": int(snapshot.updated_at * 1000),
                 }
             tmp = f"{path}.tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
@@ -133,13 +147,20 @@ class HS80Service:
 
     # -------------------------------------------------------------- update
     def publish(self, status: Status) -> bool:
-        """Store a new status; rewrite the status file on changes.
+        """Store a new status and rewrite the status file.
 
         The status file is the extension's data path (this GJS build drops
-        D-Bus signal delivery), so it is (re)written atomically on every
-        change. Returns True when the status changed.
+        D-Bus signal delivery), so it is rewritten atomically on every
+        status change – and additionally at most once per
+        ``STATUS_FILE_REFRESH_S`` seconds, so the file stays fresh even when
+        the values stop changing (e.g. a permanently disconnected dongle)
+        and its mtime remains a liveness signal. ``updated_at`` keeps
+        meaning "time of the last real status change". Returns True when
+        the status changed.
         """
         changed = False
+        rewrite = False
+        snapshot: Status | None = None
         with self._lock:
             changed = (
                 status.mode != self._status.mode
@@ -152,9 +173,18 @@ class HS80Service:
                     status.mode, status.battery, status.mic_muted,
                 )
                 self._status = status
-            else:
-                # Keep the timestamp fresh even without value changes.
-                self._status.updated_at = status.updated_at
-        if changed:
-            self._write_status_file()
+            # The file needs a rewrite on a status change, or when it has
+            # gone stale (values unchanged for a long time).
+            rewrite = (
+                changed
+                or time.monotonic() - self._last_file_write
+                >= STATUS_FILE_REFRESH_S
+            )
+            if rewrite:
+                self._last_file_write = time.monotonic()
+                # Snapshot under the lock so the write (which happens
+                # outside it) cannot lose an interleaved status change.
+                snapshot = self._status
+        if rewrite:
+            self._write_status_file(snapshot)
         return changed

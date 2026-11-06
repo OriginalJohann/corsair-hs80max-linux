@@ -299,6 +299,29 @@ def test_find_control_hidraw_skips_malformed_entries(monkeypatch, tmp_path) -> N
 
 
 # ---------------------------------------------------------------------------
+# _write timeout
+# ---------------------------------------------------------------------------
+
+def test_write_raises_hid_error_when_device_never_consumes(monkeypatch) -> None:
+    """A device that stops consuming (BlockingIOError forever) must not
+    block the caller: _write() gives up after WRITE_TIMEOUT and raises
+    HIDError, which the poller treats like any failed cycle.
+    """
+    import os
+
+    import pytest
+
+    hid = HS80HID(device_path="/dev/none")
+    hid._fd = 3  # pretend the device is open
+    # Fail every write so the retry loop spins until the deadline.
+    monkeypatch.setattr(os, "write", lambda fd, data: (_ for _ in ()).throw(BlockingIOError()))
+    # Shrink the timeout so the test finishes in milliseconds.
+    monkeypatch.setattr(hid_protocol, "WRITE_TIMEOUT", 0.02)
+    with pytest.raises(HIDError, match="timed out"):
+        hid._write(b"\x00" * 64)
+
+
+# ---------------------------------------------------------------------------
 # connection.dongle_present (fake sysfs)
 # ---------------------------------------------------------------------------
 
